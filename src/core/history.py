@@ -21,12 +21,15 @@ class HistoryRecord:
 class HistoryManager:
     """历史记录管理器"""
 
-    def __init__(self, history_path: Optional[str] = None):
+    def __init__(self, history_path: Optional[str] = None, max_records: int = 100):
         if history_path is None:
             self.history_path = self._get_default_history_path()
         else:
             self.history_path = history_path
+        self.max_records = max_records  # 最大记录数限制
         self.records: List[HistoryRecord] = self._load_history()
+        # 启动时清理超出限制的记录
+        self._enforce_limit()
 
     def _get_default_history_path(self) -> str:
         """获取默认历史记录文件路径"""
@@ -55,6 +58,13 @@ class HistoryManager:
             return True
         except IOError:
             return False
+
+    def _enforce_limit(self) -> None:
+        """强制执行记录数量限制"""
+        if len(self.records) > self.max_records:
+            # 保留最新的记录
+            self.records = self.records[:self.max_records]
+            self._save_history()
 
     def _extract_title(self, jd_text: str) -> str:
         """从JD文本中提取标题（岗位名称）"""
@@ -98,6 +108,8 @@ class HistoryManager:
             created_at=now.strftime("%Y-%m-%d %H:%M:%S")
         )
         self.records.insert(0, record)
+        # 保存后强制执行记录数量限制
+        self._enforce_limit()
         self._save_history()
         return record
 
