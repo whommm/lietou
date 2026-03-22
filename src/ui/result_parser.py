@@ -18,12 +18,24 @@ class ParsedResult:
 class ResultParser:
     """分析结果解析器"""
 
-    # 模块标题的匹配模式
+    # 模块标题的匹配模式（预编译正则表达式）
     MODULE_PATTERNS = [
-        (1, [r"模块一", r"岗位定性", r"大白话翻译", r"模块1"]),
-        (2, [r"模块二", r"核心门槛", r"剥离水分", r"模块2"]),
-        (3, [r"模块三", r"搜索关键词", r"黑话与变体", r"模块3"]),
-        (4, [r"模块四", r"布尔搜索", r"Boolean", r"模块4"]),
+        (1, [re.compile(r"模块一", re.IGNORECASE), 
+             re.compile(r"岗位定性", re.IGNORECASE), 
+             re.compile(r"大白话翻译", re.IGNORECASE), 
+             re.compile(r"模块1", re.IGNORECASE)]),
+        (2, [re.compile(r"模块二", re.IGNORECASE), 
+             re.compile(r"核心门槛", re.IGNORECASE), 
+             re.compile(r"剥离水分", re.IGNORECASE), 
+             re.compile(r"模块2", re.IGNORECASE)]),
+        (3, [re.compile(r"模块三", re.IGNORECASE), 
+             re.compile(r"搜索关键词", re.IGNORECASE), 
+             re.compile(r"黑话与变体", re.IGNORECASE), 
+             re.compile(r"模块3", re.IGNORECASE)]),
+        (4, [re.compile(r"模块四", re.IGNORECASE), 
+             re.compile(r"布尔搜索", re.IGNORECASE), 
+             re.compile(r"Boolean", re.IGNORECASE), 
+             re.compile(r"模块4", re.IGNORECASE)]),
     ]
 
     @classmethod
@@ -84,7 +96,8 @@ class ResultParser:
             found = False
 
             for pattern in patterns:
-                matches = list(re.finditer(pattern, text, re.IGNORECASE))
+                # 使用预编译的正则表达式
+                matches = list(pattern.finditer(text))
                 for match in matches:
                     if match.start() < min_pos:
                         min_pos = match.start()
@@ -104,9 +117,9 @@ class ResultParser:
         if not lines:
             return content
 
-        # 检查第一行是否是标题
+        # 检查第一行是否是标题（使用预编译的正则表达式）
         first_line = lines[0].strip()
-        if any(re.search(pattern, first_line, re.IGNORECASE)
+        if any(pattern.search(first_line)
                for _, patterns in cls.MODULE_PATTERNS
                for pattern in patterns):
             lines = lines[1:]
@@ -218,12 +231,12 @@ class StreamingParser:
 
     def _detect_current_module(self) -> int:
         """检测当前正在输出哪个模块"""
-        # 从后往前查找最近的模块标记
+        # 从后往前查找最近的模块标记（使用预编译的正则表达式）
         for module_num, patterns in reversed(ResultParser.MODULE_PATTERNS):
             for pattern in patterns:
-                if re.search(pattern, self.buffer, re.IGNORECASE):
+                if pattern.search(self.buffer):
                     # 确认这是最后出现的模块
-                    matches = list(re.finditer(pattern, self.buffer, re.IGNORECASE))
+                    matches = list(pattern.finditer(self.buffer))
                     if matches:
                         return module_num
         return self.current_module
@@ -233,10 +246,10 @@ class StreamingParser:
         if self.current_module == 0:
             return ""
 
-        # 找到当前模块的起始位置
+        # 找到当前模块的起始位置（使用预编译的正则表达式）
         start_pos = 0
         for pattern in ResultParser.MODULE_PATTERNS[self.current_module - 1][1]:
-            matches = list(re.finditer(pattern, self.buffer, re.IGNORECASE))
+            matches = list(pattern.finditer(self.buffer))
             if matches:
                 # 使用最后一个匹配
                 match = matches[-1]
@@ -248,7 +261,7 @@ class StreamingParser:
         end_pos = len(self.buffer)
         for next_module in range(self.current_module + 1, 5):
             for pattern in ResultParser.MODULE_PATTERNS[next_module - 1][1]:
-                match = re.search(pattern, self.buffer[start_pos:], re.IGNORECASE)
+                match = pattern.search(self.buffer[start_pos:])
                 if match:
                     end_pos = min(end_pos, start_pos + match.start())
                     break

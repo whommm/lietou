@@ -21,6 +21,15 @@ class HistoryRecord:
 class HistoryManager:
     """历史记录管理器"""
 
+    # 缓存正则表达式，避免重复编译
+    TITLE_PATTERNS = [
+        re.compile(r'岗位名称[：:]\s*(.+?)(?:\n|$)'),
+        re.compile(r'职位名称[：:]\s*(.+?)(?:\n|$)'),
+        re.compile(r'招聘岗位[：:]\s*(.+?)(?:\n|$)'),
+        re.compile(r'岗位[：:]\s*(.+?)(?:\n|$)'),
+        re.compile(r'职位[：:]\s*(.+?)(?:\n|$)'),
+    ]
+
     def __init__(self, history_path: Optional[str] = None, max_records: int = 100):
         if history_path is None:
             self.history_path = self._get_default_history_path()
@@ -71,16 +80,9 @@ class HistoryManager:
         if not jd_text:
             return "未命名岗位"
 
-        patterns = [
-            r'岗位名称[：:]\s*(.+?)(?:\n|$)',
-            r'职位名称[：:]\s*(.+?)(?:\n|$)',
-            r'招聘岗位[：:]\s*(.+?)(?:\n|$)',
-            r'岗位[：:]\s*(.+?)(?:\n|$)',
-            r'职位[：:]\s*(.+?)(?:\n|$)',
-        ]
-
-        for pattern in patterns:
-            match = re.search(pattern, jd_text)
+        # 使用缓存的正则表达式
+        for pattern in self.TITLE_PATTERNS:
+            match = pattern.search(jd_text)
             if match:
                 title = match.group(1).strip()
                 if len(title) > 20:
