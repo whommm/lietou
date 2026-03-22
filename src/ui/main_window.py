@@ -3,7 +3,7 @@
 import customtkinter as ctk
 from tkinter import messagebox
 import threading
-from typing import Optional
+from typing import Optional, List
 
 from ..core.config import ConfigManager
 from ..core.history import HistoryManager
@@ -39,8 +39,9 @@ class MainWindow(ctk.CTk):
         self._analysis_thread: Optional[threading.Thread] = None
         self._stop_flag = False
 
-        # 原始结果文本
-        self._raw_result = ""
+        # 原始结果文本 - 使用list收集chunk，最后合并
+        self._raw_result_chunks: List[str] = []
+        self._raw_result = ""  # 最终结果字符串
 
         # 当前分析的JD文本（用于保存历史记录）
         self._current_jd = ""
@@ -347,6 +348,7 @@ class MainWindow(ctk.CTk):
 
         # 重置状态
         self._raw_result = ""
+        self._raw_result_chunks = []
         self._analysis_done = False
 
         # 销毁卡片容器（下次切换时重新创建）
@@ -422,7 +424,7 @@ class MainWindow(ctk.CTk):
 
             # 根据配置选择流式或非流式输出
             if self.config_manager.config.stream_mode:
-                # 流式输出 - 优化：合并chunk减少UI刷新频率
+                # 流式输出 - 优化：合并chunk减少UI刷新频率，使用list收集chunk
                 import time
                 chunk_buffer = []
                 last_flush_time = time.time()
@@ -441,7 +443,7 @@ class MainWindow(ctk.CTk):
                         len(chunk_buffer) >= buffer_size_threshold):
                         # 合并缓冲区内容
                         combined_text = "".join(chunk_buffer)
-                        self._raw_result += combined_text
+                        self._raw_result_chunks.append(combined_text)
                         self.after(0, self._append_raw_text, combined_text)
                         
                         # 重置缓冲区
@@ -451,12 +453,16 @@ class MainWindow(ctk.CTk):
                 # 处理剩余的chunk
                 if chunk_buffer:
                     combined_text = "".join(chunk_buffer)
-                    self._raw_result += combined_text
+                    self._raw_result_chunks.append(combined_text)
                     self.after(0, self._append_raw_text, combined_text)
+                
+                # 最终合并所有chunk
+                self._raw_result = "".join(self._raw_result_chunks)
             else:
                 # 非流式输出
                 result = client.analyze_jd(jd_text)
                 if not self._stop_flag:
+                    self._raw_result_chunks = [result]
                     self._raw_result = result
                     self.after(0, self._append_raw_text, result)
 
@@ -529,6 +535,7 @@ class MainWindow(ctk.CTk):
 
         # 加载历史结果
         self._raw_result = record.result
+        self._raw_result_chunks = [record.result]
         self._current_jd = record.jd_text
         self._analysis_done = True
 
