@@ -71,8 +71,12 @@ class HistoryItem(ctk.CTkFrame):
         """绑定点击事件"""
         def handle_click(event):
             # 点击删除按钮时不触发
-            if event.widget.cget("text") != "×":
-                self.on_click(self.record)
+            try:
+                if event.widget.cget("text") == "×":
+                    return
+            except Exception:
+                pass
+            self.on_click(self.record)
 
         self.bind("<Button-1>", handle_click)
         for child in self.winfo_children():
