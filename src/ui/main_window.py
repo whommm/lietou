@@ -422,12 +422,37 @@ class MainWindow(ctk.CTk):
 
             # 根据配置选择流式或非流式输出
             if self.config_manager.config.stream_mode:
-                # 流式输出
+                # 流式输出 - 优化：合并chunk减少UI刷新频率
+                import time
+                chunk_buffer = []
+                last_flush_time = time.time()
+                flush_interval = 0.1  # 100ms刷新一次
+                buffer_size_threshold = 100  # 缓冲区大小阈值
+
                 for chunk in client.analyze_jd_stream(jd_text):
                     if self._stop_flag:
                         break
-                    self._raw_result += chunk
-                    self.after(0, self._append_raw_text, chunk)
+                    
+                    chunk_buffer.append(chunk)
+                    current_time = time.time()
+                    
+                    # 检查是否需要刷新：时间间隔或缓冲区大小
+                    if (current_time - last_flush_time >= flush_interval or 
+                        len(chunk_buffer) >= buffer_size_threshold):
+                        # 合并缓冲区内容
+                        combined_text = "".join(chunk_buffer)
+                        self._raw_result += combined_text
+                        self.after(0, self._append_raw_text, combined_text)
+                        
+                        # 重置缓冲区
+                        chunk_buffer = []
+                        last_flush_time = current_time
+                
+                # 处理剩余的chunk
+                if chunk_buffer:
+                    combined_text = "".join(chunk_buffer)
+                    self._raw_result += combined_text
+                    self.after(0, self._append_raw_text, combined_text)
             else:
                 # 非流式输出
                 result = client.analyze_jd(jd_text)
