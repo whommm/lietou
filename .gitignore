@@ -1,0 +1,55 @@
+# 虚拟环境
+venv/
+.venv/
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# 打包输出
+build/
+dist/
+*.spec
+
+# 配置文件（包含敏感信息）
+config.json
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# Python 内置库和第三方库
+Lib/
+libs/
+DLLs/
+Scripts/
+include/
+tcl/
+Tools/
+Doc/
+*.dll
+*.chm
+python.exe
+pythonw.exe
+python3.dll
+python38.dll
+nul
+
+# 临时文件
+*.tmp
+*.bak
+*.log
+
+# 历史记录文件（用户数据）
+history.json
+
+# Claude配置
+.claude/
