@@ -57,6 +57,9 @@ class MainWindow(ctk.CTk):
         # 加载配置到界面
         self._load_config_to_ui()
 
+        # 初始化简历匹配的岗位列表
+        self._update_resume_job_list()
+
     def _build_ui(self):
         """构建用户界面"""
         self.grid_columnconfigure(0, weight=1)
