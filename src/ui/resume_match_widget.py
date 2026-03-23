@@ -1,6 +1,6 @@
 """简历匹配组件"""
 import customtkinter as ctk
-from typing import Callable, Optional
+from typing import Callable, Optional, Dict
 
 
 class ResumeMatchWidget(ctk.CTkFrame):
@@ -10,6 +10,7 @@ class ResumeMatchWidget(ctk.CTkFrame):
         super().__init__(master, **kwargs)
         self.on_match = on_match
         self.job_list = job_list
+        self.job_data_map: Dict[str, str] = {}  # 标题 -> 完整JD文本的映射
 
         self._setup_ui()
 
@@ -45,10 +46,10 @@ class ResumeMatchWidget(ctk.CTkFrame):
 
     def _on_match_click(self):
         """匹配按钮点击事件"""
-        job_desc = self.job_combo.get()
+        job_title = self.job_combo.get()
         resume = self.resume_text.get("1.0", "end-1c").strip()
 
-        if not job_desc or job_desc == "请先分析岗位":
+        if not job_title or job_title == "请先分析岗位":
             self.result_text.delete("1.0", "end")
             self.result_text.insert("1.0", "请先选择一个岗位")
             return
@@ -58,14 +59,25 @@ class ResumeMatchWidget(ctk.CTkFrame):
             self.result_text.insert("1.0", "请输入候选人简历")
             return
 
+        # 从映射中获取完整的JD文本
+        job_desc = self.job_data_map.get(job_title, "")
+        if not job_desc:
+            self.result_text.delete("1.0", "end")
+            self.result_text.insert("1.0", "无法获取岗位信息")
+            return
+
         self.match_btn.configure(state="disabled", text="分析中...")
         self.result_text.delete("1.0", "end")
         self.on_match(job_desc, resume)
 
-    def update_job_list(self, job_list: list):
+    def update_job_list(self, job_list: list, job_data_map: Dict[str, str] = None):
         """更新岗位列表"""
         self.job_list = job_list
+        if job_data_map:
+            self.job_data_map = job_data_map
         self.job_combo.configure(values=job_list)
+        if job_list:
+            self.job_combo.set(job_list[0])
 
     def append_result(self, text: str):
         """追加结果文本"""

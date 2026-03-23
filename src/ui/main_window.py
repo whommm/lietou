@@ -618,5 +618,6 @@ class MainWindow(ctk.CTk):
         records = self.history_manager.get_all_records()
         if records:
             job_list = [f"{r.title[:30]}..." if len(r.title) > 30 else r.title for r in records]
-            self.resume_match_widget.update_job_list(job_list)
+            job_data_map = {(f"{r.title[:30]}..." if len(r.title) > 30 else r.title): r.jd_text for r in records}
+            self.resume_match_widget.update_job_list(job_list, job_data_map)
 
