@@ -75,8 +75,18 @@ class HistoryManager:
             self.records = self.records[:self.max_records]
             self._save_history()
 
-    def _extract_title(self, jd_text: str) -> str:
-        """从JD文本中提取标题（岗位名称）"""
+    def _extract_title(self, jd_text: str, result: str = "") -> str:
+        """从结果或JD文本中提取标题（岗位名称）"""
+        # 优先从AI结果中提取【岗位名称】
+        if result:
+            match = re.search(r'【岗位名称】(.+?)(?:\n|$)', result)
+            if match:
+                title = match.group(1).strip()
+                if len(title) > 30:
+                    title = title[:30] + "..."
+                return title
+
+        # 如果结果中没有，从JD文本中提取
         if not jd_text:
             return "未命名岗位"
 
@@ -104,7 +114,7 @@ class HistoryManager:
         now = datetime.now()
         record = HistoryRecord(
             id=now.strftime("%Y%m%d_%H%M%S"),
-            title=self._extract_title(jd_text),
+            title=self._extract_title(jd_text, result),
             jd_text=jd_text,
             result=result,
             created_at=now.strftime("%Y-%m-%d %H:%M:%S")
