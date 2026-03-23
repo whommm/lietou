@@ -618,7 +618,7 @@ class MainWindow(ctk.CTk):
 
     def _update_resume_job_list(self):
         """更新简历匹配的岗位列表"""
-        records = self.history_manager.get_all_records()
+        records = self.history_manager.get_all()
         if records:
             job_list = [f"{r.title[:30]}..." if len(r.title) > 30 else r.title for r in records]
             job_data_map = {(f"{r.title[:30]}..." if len(r.title) > 30 else r.title): r.jd_text for r in records}
