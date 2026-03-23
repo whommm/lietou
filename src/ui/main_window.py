@@ -12,6 +12,8 @@ from ..utils.helpers import copy_to_clipboard, validate_url, validate_api_key
 from .card_widget import CardContainer
 from .history_widget import HistoryPanel
 from .result_parser import ResultParser
+from .resume_match_widget import ResumeMatchWidget
+from ..core.prompt import RESUME_MATCH_PROMPT
 
 
 class MainWindow(ctk.CTk):
@@ -114,14 +116,41 @@ class MainWindow(ctk.CTk):
 
     def _build_main_content(self):
         """构建主内容区"""
-        main_frame = ctk.CTkFrame(self)
-        main_frame.grid(row=1, column=0, padx=10, pady=5, sticky="nsew")
-        main_frame.grid_columnconfigure(0, weight=2)  # 输入区占 2
-        main_frame.grid_columnconfigure(1, weight=3)  # 输出区占 3
-        main_frame.grid_rowconfigure(0, weight=1)
+        # 创建标签页视图
+        self.tabview = ctk.CTkTabview(self)
+        self.tabview.grid(row=1, column=0, padx=10, pady=5, sticky="nsew")
 
-        self._build_input_panel(main_frame)
-        self._build_output_panel(main_frame)
+        # 添加两个标签页
+        self.tab_job = self.tabview.add("岗位分析")
+        self.tab_resume = self.tabview.add("简历匹配")
+
+        # 构建岗位分析标签页内容
+        self._build_job_analysis_tab()
+
+        # 构建简历匹配标签页内容
+        self._build_resume_match_tab()
+
+    def _build_job_analysis_tab(self):
+        """构建岗位分析标签页"""
+        self.tab_job.grid_columnconfigure(0, weight=2)
+        self.tab_job.grid_columnconfigure(1, weight=3)
+        self.tab_job.grid_rowconfigure(0, weight=1)
+
+        self._build_input_panel(self.tab_job)
+        self._build_output_panel(self.tab_job)
+
+    def _build_resume_match_tab(self):
+        """构建简历匹配标签页"""
+        self.tab_resume.grid_columnconfigure(0, weight=1)
+        self.tab_resume.grid_rowconfigure(0, weight=1)
+
+        # 创建简历匹配组件
+        self.resume_match_widget = ResumeMatchWidget(
+            self.tab_resume,
+            on_match=self._on_resume_match,
+            job_list=["请先分析岗位"]
+        )
+        self.resume_match_widget.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
 
     def _build_input_panel(self, parent):
         """构建左侧输入面板"""
@@ -492,6 +521,8 @@ class MainWindow(ctk.CTk):
             # 保存历史记录
             if self._current_jd and self._raw_result:
                 self.history_manager.save_record(self._current_jd, self._raw_result)
+                # 更新简历匹配的岗位列表
+                self._update_resume_job_list()
             self._set_status("分析完成 - 已自动保存到历史记录")
 
     def _set_ui_analyzing(self, analyzing: bool):
@@ -550,3 +581,42 @@ class MainWindow(ctk.CTk):
             self.card_container = None
 
         self._set_status(f"已加载历史记录：{record.title}")
+
+    def _on_resume_match(self, job_desc: str, resume: str):
+        """简历匹配处理"""
+        url = self.url_entry.get().strip()
+        key = self.key_entry.get().strip()
+        model = self.model_entry.get().strip() or "deepseek-chat"
+
+        # 启动后台线程进行匹配
+        match_thread = threading.Thread(
+            target=self._do_resume_match,
+            args=(url, key, model, job_desc, resume),
+            daemon=True
+        )
+        match_thread.start()
+
+    def _do_resume_match(self, url: str, key: str, model: str, job_desc: str, resume: str):
+        """后台简历匹配任务"""
+        try:
+            client = LLMClient(api_base_url=url, api_key=key, model_name=model, timeout=60)
+
+            # 构建提示词
+            prompt = RESUME_MATCH_PROMPT.format(job_description=job_desc, resume=resume)
+
+            # 流式输出
+            for chunk in client.chat_stream(prompt):
+                self.after(0, self.resume_match_widget.append_result, chunk)
+
+            self.after(0, self.resume_match_widget.enable_match_button)
+        except Exception as e:
+            self.after(0, self.resume_match_widget.append_result, f"\n\n错误: {str(e)}")
+            self.after(0, self.resume_match_widget.enable_match_button)
+
+    def _update_resume_job_list(self):
+        """更新简历匹配的岗位列表"""
+        records = self.history_manager.get_all_records()
+        if records:
+            job_list = [f"{r.title[:30]}..." if len(r.title) > 30 else r.title for r in records]
+            self.resume_match_widget.update_job_list(job_list)
+

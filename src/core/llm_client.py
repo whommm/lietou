@@ -129,3 +129,34 @@ class LLMClient:
             raise LLMClientError(f"API 调用失败: {str(e)}") from e
         except Exception as e:
             raise LLMClientError(f"未知错误: {str(e)}") from e
+    def chat_stream(self, user_message: str, system_message: str = "") -> Generator[str, None, None]:
+        """通用聊天接口（流式输出）"""
+        try:
+            client = self._get_client()
+            messages = []
+            if system_message:
+                messages.append({"role": "system", "content": system_message})
+            messages.append({"role": "user", "content": user_message})
+
+            stream = client.chat.completions.create(
+                model=self.model_name,
+                messages=messages,
+                temperature=0.7,
+                max_tokens=4096,
+                stream=True
+            )
+            for chunk in stream:
+                if chunk.choices and chunk.choices[0].delta.content:
+                    yield chunk.choices[0].delta.content
+        except AuthenticationError as e:
+            raise AuthError("API 密钥无效或账户余额不足，请检查配置。") from e
+        except APITimeoutError as e:
+            raise TimeoutError(f"请求超时（{self.timeout}秒），请稍后重试或检查网络。") from e
+        except APIConnectionError as e:
+            raise NetworkError("无法连接到大模型服务器，请检查网络或 API 地址是否正确。") from e
+        except APIError as e:
+            if "insufficient_quota" in str(e).lower():
+                raise AuthError("账户余额不足，请充值后重试。") from e
+            raise LLMClientError(f"API 调用失败: {str(e)}") from e
+        except Exception as e:
+            raise LLMClientError(f"未知错误: {str(e)}") from e
