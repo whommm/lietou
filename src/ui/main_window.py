@@ -13,7 +13,9 @@ from .card_widget import CardContainer
 from .history_widget import HistoryPanel
 from .result_parser import ResultParser
 from .resume_match_widget import ResumeMatchWidget
+from .company_research_widget import CompanyResearchWidget
 from ..core.prompt import RESUME_MATCH_PROMPT
+from ..core.company_research_client import CompanyResearchClient, CompanyResearchError
 
 
 class MainWindow(ctk.CTk):
@@ -60,6 +62,9 @@ class MainWindow(ctk.CTk):
         # 初始化简历匹配的岗位列表
         self._update_resume_job_list()
 
+        # 初始化公司调研的历史记录列表
+        self._update_company_research_history()
+
     def _build_ui(self):
         """构建用户界面"""
         self.grid_columnconfigure(0, weight=1)
@@ -76,38 +81,32 @@ class MainWindow(ctk.CTk):
         config_frame.grid_columnconfigure(1, weight=1)
         config_frame.grid_columnconfigure(3, weight=1)
 
-        # API Base URL
+        # 第一行：LLM配置
         ctk.CTkLabel(config_frame, text="API 地址:").grid(row=0, column=0, padx=(10, 5), pady=10, sticky="w")
         self.url_entry = ctk.CTkEntry(config_frame, placeholder_text="https://api.deepseek.com/v1")
         self.url_entry.grid(row=0, column=1, padx=5, pady=10, sticky="ew")
 
-        # API Key
         ctk.CTkLabel(config_frame, text="API Key:").grid(row=0, column=2, padx=(20, 5), pady=10, sticky="w")
         self.key_entry = ctk.CTkEntry(config_frame, placeholder_text="sk-xxx...", show="*")
         self.key_entry.grid(row=0, column=3, padx=5, pady=10, sticky="ew")
 
-        # 模型名称
         ctk.CTkLabel(config_frame, text="模型:").grid(row=0, column=4, padx=(20, 5), pady=10, sticky="w")
         self.model_entry = ctk.CTkEntry(config_frame, placeholder_text="deepseek-chat", width=220)
         self.model_entry.grid(row=0, column=5, padx=5, pady=10)
 
-        # 保存配置按钮
         self.save_btn = ctk.CTkButton(config_frame, text="保存配置", width=100, command=self._on_save_config)
         self.save_btn.grid(row=0, column=6, padx=(20, 10), pady=10)
 
-        # 主题切换
         self.theme_switch = ctk.CTkSwitch(config_frame, text="深色模式", command=self._on_theme_toggle)
         self.theme_switch.grid(row=0, column=7, padx=(10, 5), pady=10)
         if self.config_manager.config.theme == "dark":
             self.theme_switch.select()
 
-        # 流式输出开关
         self.stream_switch = ctk.CTkSwitch(config_frame, text="流式输出", command=self._on_stream_toggle)
         self.stream_switch.grid(row=0, column=8, padx=(5, 5), pady=10)
         if self.config_manager.config.stream_mode:
             self.stream_switch.select()
 
-        # 历史记录按钮
         self.history_btn = ctk.CTkButton(
             config_frame,
             text="📋 历史",
@@ -117,21 +116,30 @@ class MainWindow(ctk.CTk):
         )
         self.history_btn.grid(row=0, column=9, padx=(5, 10), pady=10)
 
+        # 第二行：Tavily API Key
+        ctk.CTkLabel(config_frame, text="Tavily Key:").grid(row=1, column=0, padx=(10, 5), pady=(0, 10), sticky="w")
+        self.tavily_key_entry = ctk.CTkEntry(config_frame, placeholder_text="tvly-xxx... (用于公司调研)", show="*")
+        self.tavily_key_entry.grid(row=1, column=1, columnspan=5, padx=5, pady=(0, 10), sticky="ew")
+
     def _build_main_content(self):
         """构建主内容区"""
         # 创建标签页视图
         self.tabview = ctk.CTkTabview(self)
         self.tabview.grid(row=1, column=0, padx=10, pady=5, sticky="nsew")
 
-        # 添加两个标签页
+        # 添加三个标签页
         self.tab_job = self.tabview.add("岗位分析")
         self.tab_resume = self.tabview.add("简历匹配")
+        self.tab_company = self.tabview.add("公司调研")
 
         # 构建岗位分析标签页内容
         self._build_job_analysis_tab()
 
         # 构建简历匹配标签页内容
         self._build_resume_match_tab()
+
+        # 构建公司调研标签页内容
+        self._build_company_research_tab()
 
     def _build_job_analysis_tab(self):
         """构建岗位分析标签页"""
@@ -144,16 +152,28 @@ class MainWindow(ctk.CTk):
 
     def _build_resume_match_tab(self):
         """构建简历匹配标签页"""
-        self.tab_resume.grid_columnconfigure(0, weight=1)
+        self.tab_resume.grid_columnconfigure(0, weight=2)
+        self.tab_resume.grid_columnconfigure(1, weight=3)
         self.tab_resume.grid_rowconfigure(0, weight=1)
 
-        # 创建简历匹配组件
         self.resume_match_widget = ResumeMatchWidget(
             self.tab_resume,
             on_match=self._on_resume_match,
             job_list=["请先分析岗位"]
         )
-        self.resume_match_widget.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        self.resume_match_widget.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=5, pady=5)
+
+    def _build_company_research_tab(self):
+        """构建公司调研标签页"""
+        self.tab_company.grid_columnconfigure(0, weight=2)
+        self.tab_company.grid_columnconfigure(1, weight=3)
+        self.tab_company.grid_rowconfigure(0, weight=1)
+
+        self.company_research_widget = CompanyResearchWidget(
+            self.tab_company,
+            on_research=self._on_company_research
+        )
+        self.company_research_widget.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=5, pady=5)
 
     def _build_input_panel(self, parent):
         """构建左侧输入面板"""
@@ -333,18 +353,21 @@ class MainWindow(ctk.CTk):
             self.key_entry.insert(0, config.api_key)
         if config.model_name:
             self.model_entry.insert(0, config.model_name)
+        if config.tavily_api_key:
+            self.tavily_key_entry.insert(0, config.tavily_api_key)
 
     def _on_save_config(self):
         """保存配置按钮点击事件"""
         url = self.url_entry.get().strip()
         key = self.key_entry.get().strip()
         model = self.model_entry.get().strip() or "deepseek-chat"
+        tavily_key = self.tavily_key_entry.get().strip()
 
         if url and not validate_url(url):
             messagebox.showwarning("提示", "API 地址格式不正确，请输入以 http:// 或 https:// 开头的地址")
             return
 
-        self.config_manager.update(api_base_url=url, api_key=key, model_name=model)
+        self.config_manager.update(api_base_url=url, api_key=key, model_name=model, tavily_api_key=tavily_key)
         if self.config_manager.save_config():
             self._set_status("配置已保存")
             messagebox.showinfo("成功", "配置已保存")
@@ -623,4 +646,68 @@ class MainWindow(ctk.CTk):
             job_list = [f"{r.title[:30]}..." if len(r.title) > 30 else r.title for r in records]
             job_data_map = {(f"{r.title[:30]}..." if len(r.title) > 30 else r.title): r.jd_text for r in records}
             self.resume_match_widget.update_job_list(job_list, job_data_map)
+
+    def _update_company_research_history(self):
+        """更新公司调研的历史记录列表"""
+        records = self.history_manager.get_by_type("company_research")
+        if records:
+            history_list = [r.title for r in records]
+            history_data_map = {r.title: r.result for r in records}
+            self.company_research_widget.update_history_list(history_list, history_data_map)
+
+    def _on_company_research(self, company_name: str):
+        """公司调研处理"""
+        url = self.url_entry.get().strip()
+        key = self.key_entry.get().strip()
+        model = self.model_entry.get().strip() or "deepseek-chat"
+        tavily_key = self.tavily_key_entry.get().strip()
+
+        if not url or not key:
+            messagebox.showwarning("提示", "请先配置API地址和Key")
+            self.company_research_widget.set_researching(False)
+            return
+
+        if not tavily_key:
+            messagebox.showwarning("提示", "请先配置Tavily API Key")
+            self.company_research_widget.set_researching(False)
+            return
+
+        research_thread = threading.Thread(
+            target=self._do_company_research,
+            args=(url, key, model, tavily_key, company_name),
+            daemon=True
+        )
+        research_thread.start()
+
+    def _do_company_research(self, url: str, key: str, model: str, tavily_key: str, company_name: str):
+        """后台公司调研任务"""
+        try:
+            llm_client = LLMClient(api_base_url=url, api_key=key, model_name=model, timeout=120)
+            research_client = CompanyResearchClient(tavily_api_key=tavily_key, llm_client=llm_client)
+
+            for chunk in research_client.research(company_name):
+                self.after(0, self.company_research_widget.append_result, chunk)
+
+            self.after(0, self._on_company_research_complete, company_name, None)
+
+        except Exception as e:
+            self.after(0, self._on_company_research_complete, company_name, str(e))
+
+    def _on_company_research_complete(self, company_name: str, error: Optional[str]):
+        """公司调研完成回调"""
+        self.company_research_widget.set_researching(False)
+
+        if error:
+            messagebox.showerror("调研失败", error)
+            self._set_status("公司调研失败")
+        else:
+            result = self.company_research_widget.get_result()
+            if result:
+                self.history_manager.save_record(
+                    jd_text="[公司调研] {}".format(company_name),
+                    result=result,
+                    record_type="company_research"
+                )
+                self._update_company_research_history()
+            self._set_status("公司调研完成 - {}".format(company_name))
 

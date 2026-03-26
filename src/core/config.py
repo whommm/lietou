@@ -12,6 +12,7 @@ class AppConfig:
     api_base_url: str = ""
     api_key: str = ""
     model_name: str = "deepseek-chat"
+    tavily_api_key: str = ""  # Tavily API Key
     timeout: int = 120
     theme: str = "dark"
     stream_mode: bool = False  # 流式输出开关，默认关闭

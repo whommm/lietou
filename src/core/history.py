@@ -16,6 +16,7 @@ class HistoryRecord:
     jd_text: str = ""
     result: str = ""
     created_at: str = ""
+    record_type: str = "job_analysis"  # job_analysis, resume_match, company_research
 
 
 class HistoryManager:
@@ -109,7 +110,7 @@ class HistoryManager:
 
         return "未命名岗位"
 
-    def save_record(self, jd_text: str, result: str) -> HistoryRecord:
+    def save_record(self, jd_text: str, result: str, record_type: str = "job_analysis") -> HistoryRecord:
         """保存一条新记录"""
         now = datetime.now()
         record = HistoryRecord(
@@ -117,13 +118,17 @@ class HistoryManager:
             title=self._extract_title(jd_text, result),
             jd_text=jd_text,
             result=result,
-            created_at=now.strftime("%Y-%m-%d %H:%M:%S")
+            created_at=now.strftime("%Y-%m-%d %H:%M:%S"),
+            record_type=record_type
         )
         self.records.insert(0, record)
-        # 保存后强制执行记录数量限制
         self._enforce_limit()
         self._save_history()
         return record
+
+    def get_by_type(self, record_type: str) -> List[HistoryRecord]:
+        """按类型获取历史记录"""
+        return [r for r in self.records if r.record_type == record_type]
 
     def get_all(self) -> List[HistoryRecord]:
         """获取所有历史记录"""
