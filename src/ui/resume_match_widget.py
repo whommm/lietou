@@ -1,17 +1,20 @@
 """简历匹配组件"""
 import customtkinter as ctk
 from tkinter import messagebox
-from typing import Callable, Dict
+from typing import Callable, Dict, Optional
+
+from .html_renderer import HtmlRenderer
 
 
 class ResumeMatchWidget(ctk.CTkFrame):
     """简历匹配界面组件"""
 
-    def __init__(self, master, on_match: Callable, job_list: list, **kwargs):
+    def __init__(self, master, on_match: Callable, job_list: list, theme: str = "light", **kwargs):
         super().__init__(master, **kwargs)
         self.on_match = on_match
         self.job_list = job_list
         self.job_data_map: Dict[str, str] = {}
+        self.theme = theme
 
         self._setup_ui()
 
@@ -29,12 +32,12 @@ class ResumeMatchWidget(ctk.CTkFrame):
         input_frame = ctk.CTkFrame(self)
         input_frame.grid(row=0, column=0, padx=(10, 5), pady=10, sticky="nsew")
         input_frame.grid_columnconfigure(0, weight=1)
-        input_frame.grid_rowconfigure(3, weight=1)
+        input_frame.grid_rowconfigure(5, weight=1)
 
         # 标题
         title_label = ctk.CTkLabel(
             input_frame,
-            text="📋 简历匹配分析",
+            text="简历匹配分析",
             font=ctk.CTkFont(size=16, weight="bold")
         )
         title_label.grid(row=0, column=0, padx=10, pady=(10, 5), sticky="w")
@@ -61,7 +64,6 @@ class ResumeMatchWidget(ctk.CTkFrame):
         )
         self.resume_text = ctk.CTkTextbox(input_frame, wrap="word")
         self.resume_text.grid(row=5, column=0, padx=10, pady=(0, 10), sticky="nsew")
-        input_frame.grid_rowconfigure(5, weight=1)
 
         # 按钮区
         btn_frame = ctk.CTkFrame(input_frame, fg_color="transparent")
@@ -98,23 +100,28 @@ class ResumeMatchWidget(ctk.CTkFrame):
             font=ctk.CTkFont(size=14, weight="bold")
         ).pack(side="left")
 
+        # 按钮区
+        btn_frame = ctk.CTkFrame(header_frame, fg_color="transparent")
+        btn_frame.pack(side="right")
+
         self.copy_all_btn = ctk.CTkButton(
-            header_frame, text="复制全部", width=80, height=28,
+            btn_frame, text="复制全部", width=80, height=28,
             command=self._on_copy_all_click
         )
         self.copy_all_btn.pack(side="right", padx=5)
 
         self.clear_result_btn = ctk.CTkButton(
-            header_frame, text="清空", width=60, height=28,
+            btn_frame, text="清空", width=60, height=28,
             fg_color="gray", command=self._on_clear_result_click
         )
         self.clear_result_btn.pack(side="right", padx=5)
 
-        # 结果文本框
-        self.result_text = ctk.CTkTextbox(
-            result_frame, wrap="word", font=ctk.CTkFont(size=13)
-        )
-        self.result_text.grid(row=1, column=0, padx=10, pady=(5, 10), sticky="nsew")
+        # HTML渲染器
+        self.html_renderer = HtmlRenderer(result_frame, theme=self.theme)
+        self.html_renderer.grid(row=1, column=0, padx=10, pady=(5, 10), sticky="nsew")
+
+        # 结果缓冲区
+        self._result_buffer = ""
 
     def _on_match_click(self):
         """匹配按钮点击事件"""
@@ -135,7 +142,8 @@ class ResumeMatchWidget(ctk.CTkFrame):
             return
 
         self.set_matching(True)
-        self.result_text.delete("1.0", "end")
+        self._result_buffer = ""
+        self.html_renderer.start_stream()
         self.on_match(job_desc, resume)
 
     def _on_clear_click(self):
@@ -144,11 +152,12 @@ class ResumeMatchWidget(ctk.CTkFrame):
 
     def _on_clear_result_click(self):
         """清空结果"""
-        self.result_text.delete("1.0", "end")
+        self._result_buffer = ""
+        self.html_renderer.clear()
 
     def _on_copy_all_click(self):
         """复制全部"""
-        content = self.result_text.get("1.0", "end").strip()
+        content = self._result_buffer
         if not content:
             messagebox.showinfo("提示", "没有可复制的内容")
             return
@@ -184,9 +193,18 @@ class ResumeMatchWidget(ctk.CTkFrame):
 
     def append_result(self, text: str):
         """追加结果文本"""
-        self.result_text.insert("end", text)
-        self.result_text.see("end")
+        self._result_buffer += text
+        self.html_renderer.append_chunk(text)
+
+    def finish_stream(self):
+        """完成流式输出"""
+        self.html_renderer.finish_stream()
 
     def enable_match_button(self):
         """启用匹配按钮"""
         self.set_matching(False)
+
+    def set_theme(self, theme: str):
+        """设置主题"""
+        self.theme = theme
+        self.html_renderer.set_theme(theme)

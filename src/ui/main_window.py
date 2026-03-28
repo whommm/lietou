@@ -9,9 +9,8 @@ from ..core.config import ConfigManager
 from ..core.history import HistoryManager
 from ..core.llm_client import LLMClient, LLMClientError, AuthError, NetworkError, TimeoutError
 from ..utils.helpers import copy_to_clipboard, validate_url, validate_api_key
-from .card_widget import CardContainer
 from .history_widget import HistoryPanel
-from .result_parser import ResultParser
+from .html_renderer import HtmlRenderer
 from .resume_match_widget import ResumeMatchWidget
 from .company_research_widget import CompanyResearchWidget
 from ..core.prompt import RESUME_MATCH_PROMPT
@@ -52,7 +51,7 @@ class MainWindow(ctk.CTk):
         # 当前分析的JD文本（用于保存历史记录）
         self._current_jd = ""
 
-        # 是否已完成分析（用于控制卡片视图可用性）
+        # 是否已完成分析
         self._analysis_done = False
 
         # 构建界面
@@ -109,15 +108,6 @@ class MainWindow(ctk.CTk):
         if self.config_manager.config.stream_mode:
             self.stream_switch.select()
 
-        self.history_btn = ctk.CTkButton(
-            config_frame,
-            text="📋 历史",
-            width=80,
-            height=28,
-            command=self._on_history_click
-        )
-        self.history_btn.grid(row=0, column=9, padx=(5, 10), pady=10)
-
         # 第二行：Tavily API Key
         ctk.CTkLabel(config_frame, text="Tavily Key:").grid(row=1, column=0, padx=(10, 5), pady=(0, 10), sticky="w")
         self.tavily_key_entry = ctk.CTkEntry(config_frame, placeholder_text="tvly-xxx... (用于公司调研)", show="*")
@@ -129,16 +119,16 @@ class MainWindow(ctk.CTk):
         self.tabview = ctk.CTkTabview(self)
         self.tabview.grid(row=1, column=0, padx=10, pady=5, sticky="nsew")
 
-        # 添加三个标签页（调整顺序）
-        self.tab_company = self.tabview.add("公司调研")
+        # 添加三个标签页
         self.tab_job = self.tabview.add("岗位分析")
+        self.tab_company = self.tabview.add("公司调研")
         self.tab_resume = self.tabview.add("简历匹配")
-
-        # 构建公司调研标签页内容
-        self._build_company_research_tab()
 
         # 构建岗位分析标签页内容
         self._build_job_analysis_tab()
+
+        # 构建公司调研标签页内容
+        self._build_company_research_tab()
 
         # 构建简历匹配标签页内容
         self._build_resume_match_tab()
@@ -161,7 +151,8 @@ class MainWindow(ctk.CTk):
         self.resume_match_widget = ResumeMatchWidget(
             self.tab_resume,
             on_match=self._on_resume_match,
-            job_list=["请先分析岗位"]
+            job_list=["请先分析岗位"],
+            theme=self.config_manager.config.theme
         )
         self.resume_match_widget.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=5, pady=5)
 
@@ -174,7 +165,8 @@ class MainWindow(ctk.CTk):
         self.company_research_widget = CompanyResearchWidget(
             self.tab_company,
             on_research=self._on_company_research,
-            history_manager=self.company_history_manager
+            history_manager=self.company_history_manager,
+            theme=self.config_manager.config.theme
         )
         self.company_research_widget.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=5, pady=5)
 
@@ -183,24 +175,34 @@ class MainWindow(ctk.CTk):
         input_frame = ctk.CTkFrame(parent)
         input_frame.grid(row=0, column=0, padx=(10, 5), pady=10, sticky="nsew")
         input_frame.grid_columnconfigure(0, weight=1)
-        input_frame.grid_rowconfigure(2, weight=1)
+        input_frame.grid_rowconfigure(3, weight=1)
 
+        # 标题
         ctk.CTkLabel(input_frame, text="原始岗位描述 (JD)", font=ctk.CTkFont(size=14, weight="bold")).grid(
             row=0, column=0, padx=10, pady=(10, 5), sticky="w"
         )
 
+        # 描述
+        ctk.CTkLabel(input_frame, text="输入岗位描述，AI将自动分析并生成结构化报告", font=ctk.CTkFont(size=12),
+                     text_color=("gray50", "gray60")).grid(
+            row=1, column=0, padx=10, pady=(0, 10), sticky="w"
+        )
+
         # 公司调研选择
         ctk.CTkLabel(input_frame, text="参考公司调研（可选）:").grid(
-            row=1, column=0, padx=10, pady=(5, 5), sticky="w"
+            row=2, column=0, padx=10, pady=(5, 5), sticky="w"
         )
         self.company_combo = ctk.CTkComboBox(input_frame, values=["不使用"])
-        self.company_combo.grid(row=2, column=0, padx=10, pady=(0, 5), sticky="ew")
+        self.company_combo.grid(row=3, column=0, padx=10, pady=(0, 5), sticky="ew")
 
+        # JD输入框
         self.jd_textbox = ctk.CTkTextbox(input_frame, wrap="word")
-        self.jd_textbox.grid(row=3, column=0, padx=10, pady=5, sticky="nsew")
+        self.jd_textbox.grid(row=4, column=0, padx=10, pady=5, sticky="nsew")
+        input_frame.grid_rowconfigure(4, weight=1)
 
+        # 按钮区
         btn_frame = ctk.CTkFrame(input_frame, fg_color="transparent")
-        btn_frame.grid(row=4, column=0, padx=10, pady=10, sticky="ew")
+        btn_frame.grid(row=5, column=0, padx=10, pady=10, sticky="ew")
         btn_frame.grid_columnconfigure(0, weight=1)
 
         self.clear_btn = ctk.CTkButton(btn_frame, text="清空", width=80, fg_color="gray", command=self._on_clear_input)
@@ -223,127 +225,76 @@ class MainWindow(ctk.CTk):
 
         ctk.CTkLabel(header_frame, text="分析结果", font=ctk.CTkFont(size=14, weight="bold")).pack(side="left")
 
+        # 按钮区
+        btn_frame = ctk.CTkFrame(header_frame, fg_color="transparent")
+        btn_frame.pack(side="right")
+
         # 复制全部按钮
         self.copy_all_btn = ctk.CTkButton(
-            header_frame,
-            text="复制全部",
-            width=80,
-            height=28,
+            btn_frame, text="复制全部", width=80, height=28,
             command=self._on_copy_all
         )
         self.copy_all_btn.pack(side="right", padx=5)
 
         # 清空按钮
         self.clear_result_btn = ctk.CTkButton(
-            header_frame,
-            text="清空",
-            width=60,
-            height=28,
-            fg_color="gray",
-            command=self._on_clear_result
+            btn_frame, text="清空", width=60, height=28,
+            fg_color="gray", command=self._on_clear_result
         )
         self.clear_result_btn.pack(side="right", padx=5)
 
-        # 显示模式切换（默认原文模式）
-        self.view_mode = ctk.StringVar(value="raw")
-        mode_frame = ctk.CTkFrame(header_frame, fg_color="transparent")
-        mode_frame.pack(side="right", padx=10)
-
-        self.raw_radio = ctk.CTkRadioButton(
-            mode_frame,
-            text="原文",
-            variable=self.view_mode,
-            value="raw",
-            command=self._on_view_mode_change
+        # 历史按钮
+        self.history_btn = ctk.CTkButton(
+            btn_frame, text="历史", width=60, height=28,
+            command=self._on_history_click
         )
-        self.raw_radio.pack(side="left", padx=5)
+        self.history_btn.pack(side="right", padx=5)
 
-        self.card_radio = ctk.CTkRadioButton(
-            mode_frame,
-            text="卡片",
-            variable=self.view_mode,
-            value="card",
-            command=self._on_view_mode_change
-        )
-        self.card_radio.pack(side="left", padx=5)
-
-        self.history_radio = ctk.CTkRadioButton(
-            mode_frame,
-            text="历史",
-            variable=self.view_mode,
-            value="history",
-            command=self._on_view_mode_change
-        )
-        self.history_radio.pack(side="left", padx=5)
-
-        # 原文文本框（默认显示）
-        self.raw_textbox = ctk.CTkTextbox(output_frame, wrap="word", state="disabled")
-        self.raw_textbox.grid(row=1, column=0, padx=10, pady=(5, 10), sticky="nsew")
-
-        # 卡片容器（延迟创建，切换时才构建）
-        self.card_container = None
-        self._card_frame_placeholder = output_frame  # 保存父容器引用
+        # HTML渲染器
+        self.html_renderer = HtmlRenderer(output_frame, theme=self.config_manager.config.theme)
+        self.html_renderer.grid(row=1, column=0, padx=10, pady=(5, 10), sticky="nsew")
 
         # 历史面板（延迟创建）
         self.history_panel = None
+        self._showing_history = False
 
-    def _on_view_mode_change(self):
-        """切换显示模式"""
-        mode = self.view_mode.get()
+    def _on_history_click(self):
+        """历史按钮点击事件"""
+        if self._showing_history:
+            # 切回结果视图
+            self._hide_history()
+        else:
+            # 显示历史视图
+            self._show_history()
 
-        # 隐藏所有视图
-        self.raw_textbox.grid_forget()
-        if self.card_container:
-            self.card_container.grid_forget()
+    def _show_history(self):
+        """显示历史面板"""
+        # 隐藏HTML渲染器
+        self.html_renderer.grid_forget()
+
+        # 创建或刷新历史面板
+        if self.history_panel is None:
+            parent = self.html_renderer.parent
+            self.history_panel = HistoryPanel(
+                parent,
+                history_manager=self.job_history_manager,
+                on_load_record=self._on_load_history
+            )
+        else:
+            self.history_panel.refresh()
+
+        self.history_panel.grid(row=1, column=0, padx=10, pady=(5, 10), sticky="nsew")
+        self._showing_history = True
+        self.history_btn.configure(text="返回")
+
+    def _hide_history(self):
+        """隐藏历史面板"""
         if self.history_panel:
             self.history_panel.grid_forget()
 
-        if mode == "raw":
-            # 切换到原文模式
-            self.raw_textbox.grid(row=1, column=0, padx=10, pady=(5, 10), sticky="nsew")
-        elif mode == "card":
-            # 切换到卡片模式
-            if not self._analysis_done:
-                messagebox.showinfo("提示", "请等待分析完成后再切换到卡片视图")
-                self.view_mode.set("raw")
-                self._on_view_mode_change()
-                return
-
-            # 首次切换时创建卡片容器并渲染
-            if self.card_container is None:
-                self.card_container = CardContainer(self._card_frame_placeholder)
-                self._render_cards()
-
-            self.card_container.grid(row=1, column=0, padx=10, pady=(5, 10), sticky="nsew")
-        elif mode == "history":
-            # 切换到历史模式
-            if self.history_panel is None:
-                self.history_panel = HistoryPanel(
-                    self._card_frame_placeholder,
-                    history_manager=self.job_history_manager,
-                    on_load_record=self._on_load_history
-                )
-            else:
-                self.history_panel.refresh()
-            self.history_panel.grid(row=1, column=0, padx=10, pady=(5, 10), sticky="nsew")
-
-    def _render_cards(self):
-        """渲染卡片内容（仅在分析完成后调用一次）"""
-        if not self._raw_result:
-            return
-
-        # 解析原始文本
-        parsed = ResultParser.parse(self._raw_result)
-
-        # 更新各模块卡片
-        if parsed.module1:
-            self.card_container.update_module(1, parsed.module1)
-        if parsed.module2:
-            self.card_container.update_module(2, parsed.module2)
-        if parsed.module3:
-            self.card_container.update_module(3, parsed.module3)
-        if parsed.module4:
-            self.card_container.update_module(4, parsed.module4)
+        self.html_renderer.grid(row=1, column=0, padx=10, pady=(5, 10), sticky="nsew")
+        self._showing_history = False
+        self.history_btn.configure(text="历史")
 
     def _build_status_bar(self):
         """构建底部状态栏"""
@@ -386,13 +337,15 @@ class MainWindow(ctk.CTk):
 
     def _on_theme_toggle(self):
         """主题切换事件"""
-        if self.theme_switch.get():
-            ctk.set_appearance_mode("dark")
-            self.config_manager.update(theme="dark")
-        else:
-            ctk.set_appearance_mode("light")
-            self.config_manager.update(theme="light")
+        theme = "dark" if self.theme_switch.get() else "light"
+        ctk.set_appearance_mode(theme)
+        self.config_manager.update(theme=theme)
         self.config_manager.save_config()
+
+        # 更新HTML渲染器主题
+        self.html_renderer.set_theme(theme)
+        self.company_research_widget.set_theme(theme)
+        self.resume_match_widget.set_theme(theme)
 
     def _on_stream_toggle(self):
         """流式输出开关事件"""
@@ -406,24 +359,17 @@ class MainWindow(ctk.CTk):
 
     def _on_clear_result(self):
         """清空结果"""
-        # 清空原文
-        self.raw_textbox.configure(state="normal")
-        self.raw_textbox.delete("1.0", "end")
-        self.raw_textbox.configure(state="disabled")
+        # 清空HTML渲染器
+        self.html_renderer.clear()
 
         # 重置状态
         self._raw_result = ""
         self._raw_result_chunks = []
         self._analysis_done = False
 
-        # 销毁卡片容器（下次切换时重新创建）
-        if self.card_container:
-            self.card_container.destroy()
-            self.card_container = None
-
-        # 切回原文模式
-        self.view_mode.set("raw")
-        self._on_view_mode_change()
+        # 如果正在显示历史，切回结果视图
+        if self._showing_history:
+            self._hide_history()
 
     def _on_copy_all(self):
         """复制全部结果"""
@@ -475,9 +421,16 @@ class MainWindow(ctk.CTk):
         # 清空结果区
         self._on_clear_result()
 
+        # 如果正在显示历史，切回结果视图
+        if self._showing_history:
+            self._hide_history()
+
         # 锁定 UI
         self._set_ui_analyzing(True)
         self._stop_flag = False
+
+        # 开始流式输出
+        self.html_renderer.start_stream()
 
         # 启动后台线程
         self._analysis_thread = threading.Thread(
@@ -503,8 +456,8 @@ class MainWindow(ctk.CTk):
                 import time
                 chunk_buffer = []
                 last_flush_time = time.time()
-                flush_interval = 0.1
-                buffer_size_threshold = 100
+                flush_interval = 0.15  # 更新间隔
+                buffer_size_threshold = 150
 
                 for chunk in client.analyze_jd_stream(jd_text, company_context):
                     if self._stop_flag:
@@ -514,10 +467,10 @@ class MainWindow(ctk.CTk):
                     current_time = time.time()
 
                     if (current_time - last_flush_time >= flush_interval or
-                        len(chunk_buffer) >= buffer_size_threshold):
+                        len("".join(chunk_buffer)) >= buffer_size_threshold):
                         combined_text = "".join(chunk_buffer)
                         self._raw_result_chunks.append(combined_text)
-                        self.after(0, self._append_raw_text, combined_text)
+                        self.after(0, self._update_html_display, combined_text)
 
                         chunk_buffer = []
                         last_flush_time = current_time
@@ -525,7 +478,7 @@ class MainWindow(ctk.CTk):
                 if chunk_buffer:
                     combined_text = "".join(chunk_buffer)
                     self._raw_result_chunks.append(combined_text)
-                    self.after(0, self._append_raw_text, combined_text)
+                    self.after(0, self._update_html_display, combined_text)
 
                 self._raw_result = "".join(self._raw_result_chunks)
             else:
@@ -534,7 +487,7 @@ class MainWindow(ctk.CTk):
                 if not self._stop_flag:
                     self._raw_result_chunks = [result]
                     self._raw_result = result
-                    self.after(0, self._append_raw_text, result)
+                    self.after(0, self._update_html_display, result)
 
             if not self._stop_flag:
                 self.after(0, self._on_analysis_complete, None)
@@ -544,16 +497,20 @@ class MainWindow(ctk.CTk):
         except Exception as e:
             self.after(0, self._on_analysis_complete, f"未知错误: {str(e)}")
 
-    def _append_raw_text(self, text: str):
-        """追加原文文本"""
-        self.raw_textbox.configure(state="normal")
-        self.raw_textbox.insert("end", text)
-        self.raw_textbox.see("end")
-        self.raw_textbox.configure(state="disabled")
+    def _update_html_display(self, text: str):
+        """更新HTML显示"""
+        # 追加到HTML渲染器的缓冲区
+        self.html_renderer._buffer += text
+        # 更新显示
+        self.html_renderer._update_stream_display()
 
     def _on_analysis_complete(self, error: Optional[str]):
         """分析完成回调"""
         self._set_ui_analyzing(False)
+
+        # 完成流式输出，进行最终渲染
+        self.html_renderer.finish_stream()
+
         if error:
             messagebox.showerror("分析失败", error)
             self._set_status("分析失败")
@@ -585,22 +542,14 @@ class MainWindow(ctk.CTk):
         self._stop_flag = True
         self.destroy()
 
-    def _on_history_click(self):
-        """历史记录按钮点击事件"""
-        self.view_mode.set("history")
-        self._on_view_mode_change()
-
     def _on_load_history(self, record):
         """加载历史记录到主界面"""
-        # 切回原文模式
-        self.view_mode.set("raw")
-        self._on_view_mode_change()
+        # 切回结果视图
+        if self._showing_history:
+            self._hide_history()
 
         # 清空当前内容
         self.jd_textbox.delete("1.0", "end")
-        self.raw_textbox.configure(state="normal")
-        self.raw_textbox.delete("1.0", "end")
-        self.raw_textbox.configure(state="disabled")
 
         # 加载历史JD
         self.jd_textbox.insert("1.0", record.jd_text)
@@ -611,15 +560,8 @@ class MainWindow(ctk.CTk):
         self._current_jd = record.jd_text
         self._analysis_done = True
 
-        # 显示结果
-        self.raw_textbox.configure(state="normal")
-        self.raw_textbox.insert("1.0", record.result)
-        self.raw_textbox.configure(state="disabled")
-
-        # 销毁旧的卡片容器（如果有）
-        if self.card_container:
-            self.card_container.destroy()
-            self.card_container = None
+        # 显示结果（使用HTML渲染）
+        self.html_renderer.set_content(record.result)
 
         self._set_status(f"已加载历史记录：{record.title}")
 
@@ -646,12 +588,18 @@ class MainWindow(ctk.CTk):
             prompt = RESUME_MATCH_PROMPT.format(job_description=job_desc, resume=resume)
 
             # 流式输出
+            result_chunks = []
             for chunk in client.chat_stream(prompt):
+                result_chunks.append(chunk)
                 self.after(0, self.resume_match_widget.append_result, chunk)
+
+            # 完成后更新HTML显示
+            self.after(0, self.resume_match_widget.finish_stream)
 
             self.after(0, self.resume_match_widget.enable_match_button)
         except Exception as e:
             self.after(0, self.resume_match_widget.append_result, f"\n\n错误: {str(e)}")
+            self.after(0, self.resume_match_widget.finish_stream)
             self.after(0, self.resume_match_widget.enable_match_button)
 
     def _update_company_list(self):
@@ -671,7 +619,6 @@ class MainWindow(ctk.CTk):
             job_list = [f"{r.title[:30]}..." if len(r.title) > 30 else r.title for r in records]
             job_data_map = {(f"{r.title[:30]}..." if len(r.title) > 30 else r.title): r.jd_text for r in records}
             self.resume_match_widget.update_job_list(job_list, job_data_map)
-
 
     def _on_company_research(self, company_name: str):
         """公司调研处理"""
@@ -706,9 +653,14 @@ class MainWindow(ctk.CTk):
             for chunk in research_client.research(company_name):
                 self.after(0, self.company_research_widget.append_result, chunk)
 
+            # 完成后更新HTML显示
+            self.after(0, self.company_research_widget.finish_stream)
+
             self.after(0, self._on_company_research_complete, company_name, None)
 
         except Exception as e:
+            self.after(0, self.company_research_widget.append_result, f"\n\n错误: {str(e)}")
+            self.after(0, self.company_research_widget.finish_stream)
             self.after(0, self._on_company_research_complete, company_name, str(e))
 
     def _on_company_research_complete(self, company_name: str, error: Optional[str]):
@@ -728,4 +680,3 @@ class MainWindow(ctk.CTk):
                 self.company_research_widget.refresh_history()
                 self._update_company_list()
             self._set_status("公司调研完成 - {}".format(company_name))
-
