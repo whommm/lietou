@@ -136,10 +136,10 @@ class HtmlRenderer:
         self._md.reset()
         # 显示加载状态
         loading_html = self._wrap_html(
-            '<p style="color: #1a73e8;">'
-            '<span style="display: inline-block; animation: pulse 1s infinite;">●</span> '
-            'AI 正在思考中...</p>'
-            '<style>@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }</style>'
+            '<div style="text-align: center; padding: 20px; color: #667eea;">'
+            '<span style="font-size: 24px;">&#x1F916;</span><br>'
+            '<span style="font-size: 18px; font-weight: 600;">AI 正在思考中...</span>'
+            '</div>'
         )
         self._html_frame.load_html(loading_html)
 
@@ -152,8 +152,8 @@ class HtmlRenderer:
         """
         self._buffer += chunk
 
-        # 定期更新显示（每收到一定量的文本后更新）
-        if len(self._buffer) % 500 == 0 or len(chunk) > 50:
+        # 更频繁地更新显示
+        if len(self._buffer) % 200 == 0 or len(chunk) > 30:
             self._update_stream_display()
 
     def _update_stream_display(self):

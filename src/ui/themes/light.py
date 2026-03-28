@@ -8,45 +8,45 @@ LIGHT_CSS = """
 
 body {
     font-family: 'Microsoft YaHei', 'Segoe UI', Arial, sans-serif;
-    font-size: 14px;
+    font-size: 16px;
     color: #333333;
     background-color: #ffffff;
     line-height: 1.8;
-    padding: 20px;
+    padding: 15px;
     margin: 0;
 }
 
 /* === 标题样式 === */
 h1 {
     color: #1a1a2e;
-    font-size: 24px;
+    font-size: 28px;
     font-weight: 700;
-    margin: 20px 0 15px 0;
+    margin: 15px 0 12px 0;
     padding-bottom: 10px;
     border-bottom: 3px solid #667eea;
 }
 
 h2 {
     color: #1a1a2e;
-    font-size: 20px;
+    font-size: 22px;
     font-weight: 600;
-    margin: 18px 0 12px 0;
+    margin: 15px 0 10px 0;
     padding-bottom: 8px;
     border-bottom: 2px solid #e0e0e0;
 }
 
 h3 {
     color: #333;
-    font-size: 16px;
+    font-size: 18px;
     font-weight: 600;
-    margin: 15px 0 10px 0;
+    margin: 12px 0 8px 0;
 }
 
 h4 {
     color: #555;
-    font-size: 14px;
+    font-size: 16px;
     font-weight: 600;
-    margin: 12px 0 8px 0;
+    margin: 10px 0 6px 0;
 }
 
 /* === 渐变卡片 === */
