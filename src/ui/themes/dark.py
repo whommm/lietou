@@ -8,18 +8,24 @@ DARK_CSS = """
 
 body {
     font-family: 'Microsoft YaHei', 'Segoe UI', Arial, sans-serif;
-    font-size: 16px;
-    color: #e0e0e0;
+    font-size: 18px;
+    color: #f0f0f0;
     background-color: #1a1a2e;
-    line-height: 1.8;
+    line-height: 1.9;
     padding: 15px;
     margin: 0;
+}
+
+/* === 段落样式 === */
+p {
+    color: #f0f0f0;
+    margin: 10px 0;
 }
 
 /* === 标题样式 === */
 h1 {
     color: #ffffff;
-    font-size: 28px;
+    font-size: 30px;
     font-weight: 700;
     margin: 15px 0 12px 0;
     padding-bottom: 10px;
@@ -28,8 +34,8 @@ h1 {
 
 h2 {
     color: #ffffff;
-    font-size: 22px;
-    font-weight: 600;
+    font-size: 24px;
+    font-weight: 700;
     margin: 15px 0 10px 0;
     padding-bottom: 8px;
     border-bottom: 2px solid #3a3a5c;
@@ -37,14 +43,14 @@ h2 {
 
 h3 {
     color: #e0e0e0;
-    font-size: 18px;
+    font-size: 20px;
     font-weight: 600;
     margin: 12px 0 8px 0;
 }
 
 h4 {
-    color: #b0b0b0;
-    font-size: 16px;
+    color: #c0c0c0;
+    font-size: 18px;
     font-weight: 600;
     margin: 10px 0 6px 0;
 }
@@ -231,8 +237,8 @@ h4 {
 }
 
 .feature-desc {
-    color: #a0a0a0;
-    font-size: 13px;
+    color: #d0d0d0;
+    font-size: 15px;
 }
 
 /* === 提示框 === */
@@ -333,6 +339,22 @@ tr:last-child td {
 ul, ol {
     padding-left: 25px;
     margin: 10px 0;
+}
+
+li {
+    margin: 8px 0;
+    color: #f0f0f0;
+}
+
+/* === 强调文本 === */
+strong, b {
+    color: #ffffff;
+    font-weight: 700;
+}
+
+em, i {
+    font-style: italic;
+    color: #c0c0c0;
 }
 
 li {
