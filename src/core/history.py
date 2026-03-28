@@ -31,23 +31,27 @@ class HistoryManager:
         re.compile(r'职位[：:]\s*(.+?)(?:\n|$)'),
     ]
 
-    def __init__(self, history_path: Optional[str] = None, max_records: int = 100):
-        if history_path is None:
-            self.history_path = self._get_default_history_path()
-        else:
-            self.history_path = history_path
-        self.max_records = max_records  # 最大记录数限制
+    def __init__(self, record_type: str = "job_analysis", max_records: int = 100):
+        self.record_type = record_type
+        self.history_path = self._get_history_path(record_type)
+        self.max_records = max_records
         self.records: List[HistoryRecord] = self._load_history()
-        # 启动时清理超出限制的记录
         self._enforce_limit()
 
-    def _get_default_history_path(self) -> str:
-        """获取默认历史记录文件路径"""
+    def _get_history_path(self, record_type: str) -> str:
+        """根据类型获取历史记录文件路径"""
         if getattr(os.sys, 'frozen', False):
             base_dir = os.path.dirname(os.sys.executable)
         else:
             base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        return os.path.join(base_dir, "history.json")
+
+        filename_map = {
+            "job_analysis": "history_job_analysis.json",
+            "resume_match": "history_resume_match.json",
+            "company_research": "history_company_research.json"
+        }
+        filename = filename_map.get(record_type, "history.json")
+        return os.path.join(base_dir, filename)
 
     def _load_history(self) -> List[HistoryRecord]:
         """从文件加载历史记录"""
@@ -110,7 +114,7 @@ class HistoryManager:
 
         return "未命名岗位"
 
-    def save_record(self, jd_text: str, result: str, record_type: str = "job_analysis") -> HistoryRecord:
+    def save_record(self, jd_text: str, result: str) -> HistoryRecord:
         """保存一条新记录"""
         now = datetime.now()
         record = HistoryRecord(
@@ -119,16 +123,12 @@ class HistoryManager:
             jd_text=jd_text,
             result=result,
             created_at=now.strftime("%Y-%m-%d %H:%M:%S"),
-            record_type=record_type
+            record_type=self.record_type
         )
         self.records.insert(0, record)
         self._enforce_limit()
         self._save_history()
         return record
-
-    def get_by_type(self, record_type: str) -> List[HistoryRecord]:
-        """按类型获取历史记录"""
-        return [r for r in self.records if r.record_type == record_type]
 
     def get_all(self) -> List[HistoryRecord]:
         """获取所有历史记录"""

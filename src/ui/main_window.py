@@ -27,8 +27,10 @@ class MainWindow(ctk.CTk):
         # 配置管理器
         self.config_manager = ConfigManager()
 
-        # 历史记录管理器
-        self.history_manager = HistoryManager()
+        # 历史记录管理器 - 三个独立的管理器
+        self.job_history_manager = HistoryManager(record_type="job_analysis")
+        self.resume_history_manager = HistoryManager(record_type="resume_match")
+        self.company_history_manager = HistoryManager(record_type="company_research")
 
         # 窗口基本设置
         self.title("智能岗位分析与寻访助手")
@@ -62,8 +64,8 @@ class MainWindow(ctk.CTk):
         # 初始化简历匹配的岗位列表
         self._update_resume_job_list()
 
-        # 初始化公司调研的历史记录列表
-        self._update_company_research_history()
+        # 初始化岗位分析的公司调研列表
+        self._update_company_list()
 
     def _build_ui(self):
         """构建用户界面"""
@@ -127,19 +129,19 @@ class MainWindow(ctk.CTk):
         self.tabview = ctk.CTkTabview(self)
         self.tabview.grid(row=1, column=0, padx=10, pady=5, sticky="nsew")
 
-        # 添加三个标签页
+        # 添加三个标签页（调整顺序）
+        self.tab_company = self.tabview.add("公司调研")
         self.tab_job = self.tabview.add("岗位分析")
         self.tab_resume = self.tabview.add("简历匹配")
-        self.tab_company = self.tabview.add("公司调研")
+
+        # 构建公司调研标签页内容
+        self._build_company_research_tab()
 
         # 构建岗位分析标签页内容
         self._build_job_analysis_tab()
 
         # 构建简历匹配标签页内容
         self._build_resume_match_tab()
-
-        # 构建公司调研标签页内容
-        self._build_company_research_tab()
 
     def _build_job_analysis_tab(self):
         """构建岗位分析标签页"""
@@ -171,7 +173,8 @@ class MainWindow(ctk.CTk):
 
         self.company_research_widget = CompanyResearchWidget(
             self.tab_company,
-            on_research=self._on_company_research
+            on_research=self._on_company_research,
+            history_manager=self.company_history_manager
         )
         self.company_research_widget.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=5, pady=5)
 
@@ -180,17 +183,24 @@ class MainWindow(ctk.CTk):
         input_frame = ctk.CTkFrame(parent)
         input_frame.grid(row=0, column=0, padx=(10, 5), pady=10, sticky="nsew")
         input_frame.grid_columnconfigure(0, weight=1)
-        input_frame.grid_rowconfigure(1, weight=1)
+        input_frame.grid_rowconfigure(2, weight=1)
 
         ctk.CTkLabel(input_frame, text="原始岗位描述 (JD)", font=ctk.CTkFont(size=14, weight="bold")).grid(
             row=0, column=0, padx=10, pady=(10, 5), sticky="w"
         )
 
+        # 公司调研选择
+        ctk.CTkLabel(input_frame, text="参考公司调研（可选）:").grid(
+            row=1, column=0, padx=10, pady=(5, 5), sticky="w"
+        )
+        self.company_combo = ctk.CTkComboBox(input_frame, values=["不使用"])
+        self.company_combo.grid(row=2, column=0, padx=10, pady=(0, 5), sticky="ew")
+
         self.jd_textbox = ctk.CTkTextbox(input_frame, wrap="word")
-        self.jd_textbox.grid(row=1, column=0, padx=10, pady=5, sticky="nsew")
+        self.jd_textbox.grid(row=3, column=0, padx=10, pady=5, sticky="nsew")
 
         btn_frame = ctk.CTkFrame(input_frame, fg_color="transparent")
-        btn_frame.grid(row=2, column=0, padx=10, pady=10, sticky="ew")
+        btn_frame.grid(row=4, column=0, padx=10, pady=10, sticky="ew")
         btn_frame.grid_columnconfigure(0, weight=1)
 
         self.clear_btn = ctk.CTkButton(btn_frame, text="清空", width=80, fg_color="gray", command=self._on_clear_input)
@@ -310,7 +320,7 @@ class MainWindow(ctk.CTk):
             if self.history_panel is None:
                 self.history_panel = HistoryPanel(
                     self._card_frame_placeholder,
-                    history_manager=self.history_manager,
+                    history_manager=self.job_history_manager,
                     on_load_record=self._on_load_history
                 )
             else:
@@ -452,6 +462,16 @@ class MainWindow(ctk.CTk):
         # 保存当前JD文本
         self._current_jd = jd_text
 
+        # 获取公司调研上下文
+        company_context = ""
+        company_title = self.company_combo.get()
+        if company_title and company_title != "不使用":
+            records = self.company_history_manager.get_all()
+            for record in records:
+                if record.title == company_title:
+                    company_context = record.result
+                    break
+
         # 清空结果区
         self._on_clear_result()
 
@@ -462,12 +482,12 @@ class MainWindow(ctk.CTk):
         # 启动后台线程
         self._analysis_thread = threading.Thread(
             target=self._do_analysis,
-            args=(url, key, model, jd_text),
+            args=(url, key, model, jd_text, company_context),
             daemon=True
         )
         self._analysis_thread.start()
 
-    def _do_analysis(self, url: str, key: str, model: str, jd_text: str):
+    def _do_analysis(self, url: str, key: str, model: str, jd_text: str, company_context: str = ""):
         """后台分析任务（在子线程中运行）"""
         try:
             client = LLMClient(
@@ -479,43 +499,38 @@ class MainWindow(ctk.CTk):
 
             # 根据配置选择流式或非流式输出
             if self.config_manager.config.stream_mode:
-                # 流式输出 - 优化：合并chunk减少UI刷新频率，使用list收集chunk
+                # 流式输出
                 import time
                 chunk_buffer = []
                 last_flush_time = time.time()
-                flush_interval = 0.1  # 100ms刷新一次
-                buffer_size_threshold = 100  # 缓冲区大小阈值
+                flush_interval = 0.1
+                buffer_size_threshold = 100
 
-                for chunk in client.analyze_jd_stream(jd_text):
+                for chunk in client.analyze_jd_stream(jd_text, company_context):
                     if self._stop_flag:
                         break
-                    
+
                     chunk_buffer.append(chunk)
                     current_time = time.time()
-                    
-                    # 检查是否需要刷新：时间间隔或缓冲区大小
-                    if (current_time - last_flush_time >= flush_interval or 
+
+                    if (current_time - last_flush_time >= flush_interval or
                         len(chunk_buffer) >= buffer_size_threshold):
-                        # 合并缓冲区内容
                         combined_text = "".join(chunk_buffer)
                         self._raw_result_chunks.append(combined_text)
                         self.after(0, self._append_raw_text, combined_text)
-                        
-                        # 重置缓冲区
+
                         chunk_buffer = []
                         last_flush_time = current_time
-                
-                # 处理剩余的chunk
+
                 if chunk_buffer:
                     combined_text = "".join(chunk_buffer)
                     self._raw_result_chunks.append(combined_text)
                     self.after(0, self._append_raw_text, combined_text)
-                
-                # 最终合并所有chunk
+
                 self._raw_result = "".join(self._raw_result_chunks)
             else:
                 # 非流式输出
-                result = client.analyze_jd(jd_text)
+                result = client.analyze_jd(jd_text, company_context)
                 if not self._stop_flag:
                     self._raw_result_chunks = [result]
                     self._raw_result = result
@@ -546,7 +561,7 @@ class MainWindow(ctk.CTk):
             self._analysis_done = True
             # 保存历史记录
             if self._current_jd and self._raw_result:
-                self.history_manager.save_record(self._current_jd, self._raw_result)
+                self.job_history_manager.save_record(self._current_jd, self._raw_result)
                 # 更新简历匹配的岗位列表
                 self._update_resume_job_list()
             self._set_status("分析完成 - 已自动保存到历史记录")
@@ -639,21 +654,24 @@ class MainWindow(ctk.CTk):
             self.after(0, self.resume_match_widget.append_result, f"\n\n错误: {str(e)}")
             self.after(0, self.resume_match_widget.enable_match_button)
 
+    def _update_company_list(self):
+        """更新岗位分析的公司调研列表"""
+        records = self.company_history_manager.get_all()
+        if records:
+            company_list = ["不使用"] + [r.title for r in records]
+            self.company_combo.configure(values=company_list)
+            self.company_combo.set("不使用")
+        else:
+            self.company_combo.configure(values=["不使用"])
+            self.company_combo.set("不使用")
+
     def _update_resume_job_list(self):
-        """更新简历匹配的岗位列表"""
-        records = self.history_manager.get_all()
+        records = self.job_history_manager.get_all()
         if records:
             job_list = [f"{r.title[:30]}..." if len(r.title) > 30 else r.title for r in records]
             job_data_map = {(f"{r.title[:30]}..." if len(r.title) > 30 else r.title): r.jd_text for r in records}
             self.resume_match_widget.update_job_list(job_list, job_data_map)
 
-    def _update_company_research_history(self):
-        """更新公司调研的历史记录列表"""
-        records = self.history_manager.get_by_type("company_research")
-        if records:
-            history_list = [r.title for r in records]
-            history_data_map = {r.title: r.result for r in records}
-            self.company_research_widget.update_history_list(history_list, history_data_map)
 
     def _on_company_research(self, company_name: str):
         """公司调研处理"""
@@ -703,11 +721,11 @@ class MainWindow(ctk.CTk):
         else:
             result = self.company_research_widget.get_result()
             if result:
-                self.history_manager.save_record(
+                self.company_history_manager.save_record(
                     jd_text="[公司调研] {}".format(company_name),
-                    result=result,
-                    record_type="company_research"
+                    result=result
                 )
-                self._update_company_research_history()
+                self.company_research_widget.refresh_history()
+                self._update_company_list()
             self._set_status("公司调研完成 - {}".format(company_name))
 

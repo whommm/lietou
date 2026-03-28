@@ -45,12 +45,13 @@ class LLMClient:
             )
         return self._client
 
-    def analyze_jd(self, jd_text: str) -> str:
+    def analyze_jd(self, jd_text: str, company_context: str = "") -> str:
         """
         分析岗位描述（非流式）
 
         Args:
             jd_text: 原始岗位描述文本
+            company_context: 公司调研上下文（可选）
 
         Returns:
             分析结果文本
@@ -63,11 +64,17 @@ class LLMClient:
         """
         try:
             client = self._get_client()
+
+            # 构建用户消息
+            user_message = jd_text
+            if company_context:
+                user_message = f"【公司背景信息】\n{company_context}\n\n【岗位描述】\n{jd_text}"
+
             response = client.chat.completions.create(
                 model=self.model_name,
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": jd_text}
+                    {"role": "user", "content": user_message}
                 ],
                 temperature=0.7,
                 max_tokens=4096
@@ -86,12 +93,13 @@ class LLMClient:
         except Exception as e:
             raise LLMClientError(f"未知错误: {str(e)}") from e
 
-    def analyze_jd_stream(self, jd_text: str) -> Generator[str, None, None]:
+    def analyze_jd_stream(self, jd_text: str, company_context: str = "") -> Generator[str, None, None]:
         """
         分析岗位描述（流式输出）
 
         Args:
             jd_text: 原始岗位描述文本
+            company_context: 公司调研上下文（可选）
 
         Yields:
             分析结果文本片段
@@ -104,11 +112,17 @@ class LLMClient:
         """
         try:
             client = self._get_client()
+
+            # 构建用户消息
+            user_message = jd_text
+            if company_context:
+                user_message = f"【公司背景信息】\n{company_context}\n\n【岗位描述】\n{jd_text}"
+
             stream = client.chat.completions.create(
                 model=self.model_name,
                 messages=[
                     {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": jd_text}
+                    {"role": "user", "content": user_message}
                 ],
                 temperature=0.7,
                 max_tokens=4096,
