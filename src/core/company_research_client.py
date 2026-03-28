@@ -5,27 +5,84 @@ if sys.version_info < (3, 9):
     from typing import Dict as dict
 
 from tavily import TavilyClient
-import trafilatura
 from typing import Generator, List, Dict
 from .prompt import COMPANY_RESEARCH_PROMPT
 from .llm_client import LLMClient
 import logging
 import os
+import sys
+
+# 设置SSL证书路径，解决打包后HTTPS请求问题
+if getattr(sys, 'frozen', False):
+    try:
+        import certifi
+        os.environ['REQUESTS_CA_BUNDLE'] = certifi.where()
+        os.environ['CURL_CA_BUNDLE'] = certifi.where()
+    except ImportError:
+        pass
+
+import trafilatura
 
 # 配置日志
-log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'logs')
-os.makedirs(log_dir, exist_ok=True)
-log_file = os.path.join(log_dir, 'company_research.log')
-
-logging.basicConfig(
-    level=logging.DEBUG,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(log_file, encoding='utf-8'),
-        logging.StreamHandler()
-    ]
-)
 logger = logging.getLogger(__name__)
+
+def setup_logging():
+    """设置日志系统"""
+    try:
+        # 确定日志目录
+        if getattr(sys, 'frozen', False):
+            # 打包后的环境：优先使用exe所在目录，失败则使用用户目录
+            base_dir = os.path.dirname(sys.executable)
+            log_dir = os.path.join(base_dir, 'logs')
+            
+            # 尝试创建日志目录，如果失败则使用用户目录
+            try:
+                os.makedirs(log_dir, exist_ok=True)
+            except (OSError, PermissionError):
+                # 回退到用户AppData目录
+                appdata = os.environ.get('LOCALAPPDATA') or os.environ.get('APPDATA')
+                if appdata:
+                    log_dir = os.path.join(appdata, '智能岗位分析助手', 'logs')
+                    os.makedirs(log_dir, exist_ok=True)
+                else:
+                    # 最后回退到临时目录
+                    import tempfile
+                    log_dir = os.path.join(tempfile.gettempdir(), '智能岗位分析助手_logs')
+                    os.makedirs(log_dir, exist_ok=True)
+        else:
+            # 开发环境
+            base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            log_dir = os.path.join(base_dir, 'logs')
+            os.makedirs(log_dir, exist_ok=True)
+        
+        log_file = os.path.join(log_dir, 'company_research.log')
+        
+        # 配置文件日志处理器
+        file_handler = logging.FileHandler(log_file, encoding='utf-8')
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+        
+        # 获取根日志记录器并配置
+        root_logger = logging.getLogger()
+        root_logger.setLevel(logging.DEBUG)
+        root_logger.addHandler(file_handler)
+        
+        # 如果是开发环境，也输出到控制台
+        if not getattr(sys, 'frozen', False):
+            console_handler = logging.StreamHandler()
+            console_handler.setLevel(logging.DEBUG)
+            console_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+            root_logger.addHandler(console_handler)
+        
+        logger.info("日志系统初始化完成，日志文件: {}".format(log_file))
+        return True
+        
+    except Exception as e:
+        logger.warning("日志系统初始化失败: {}".format(str(e)))
+        return False
+
+# 初始化日志系统
+setup_logging()
 
 
 class CompanyResearchError(Exception):
