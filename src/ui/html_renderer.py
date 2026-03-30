@@ -54,6 +54,11 @@ class HtmlRenderer:
         # 绑定Configure事件检测内容变化
         self._html_frame.bind('<Configure>', self._on_configure)
 
+        # 创建浮动回到底部按钮
+        self._scroll_btn = None
+        self._scroll_btn_visible = False
+        self._create_scroll_button()
+
         # 加载初始空白内容
         self._load_empty()
 
@@ -88,22 +93,6 @@ class HtmlRenderer:
         if self._is_streaming and not self._user_scrolled:
             self._scroll_to_bottom()
 
-    def _check_scroll_position(self):
-        """检查滚动位置，判断用户是否手动滚动"""
-        try:
-            pos = self._html_frame.yview()
-            if pos and len(pos) == 2:
-                current_pos = pos[1]
-                # 如果用户滚回底部（>=0.99），恢复自动跟随
-                if current_pos >= 0.99:
-                    self._user_scrolled = False
-                # 如果位置明显不在底部，标记为用户已滚动
-                elif current_pos < 0.95:
-                    self._user_scrolled = True
-                self._last_scroll_pos = current_pos
-        except Exception:
-            pass
-
     def _start_scroll_check(self):
         """启动定期滚动位置检查"""
         if self._scroll_check_id:
@@ -123,6 +112,84 @@ class HtmlRenderer:
         try:
             # 使用yview_moveto滚动到底部
             self._html_frame.yview_moveto(1.0)
+        except Exception:
+            pass
+
+    def _create_scroll_button(self):
+        """创建浮动回到底部按钮"""
+        # 使用Canvas作为浮动按钮容器
+        self._scroll_btn_canvas = tk.Canvas(
+            self.parent,
+            width=40,
+            height=40,
+            highlightthickness=0,
+            bg='#4CAF50' if self.theme == 'light' else '#667eea'
+        )
+        # 绘制向下箭头
+        self._draw_arrow()
+        # 绑定点击事件
+        self._scroll_btn_canvas.bind('<Button-1>', self._on_scroll_btn_click)
+        # 初始隐藏
+        self._scroll_btn_visible = False
+
+    def _draw_arrow(self):
+        """绘制向下箭头"""
+        self._scroll_btn_canvas.delete('all')
+        # 绘制圆形背景
+        self._scroll_btn_canvas.create_oval(
+            5, 5, 35, 35,
+            fill='#4CAF50' if self.theme == 'light' else '#667eea',
+            outline=''
+        )
+        # 绘制向下箭头
+        self._scroll_btn_canvas.create_line(
+            20, 12, 20, 28,
+            fill='white', width=2, arrow='last', arrowshape=(8, 10, 5)
+        )
+
+    def _on_scroll_btn_click(self, event=None):
+        """回到底部按钮点击事件"""
+        # 滚动到底部
+        self._scroll_to_bottom()
+        # 恢复自动跟随
+        self._user_scrolled = False
+        # 隐藏按钮
+        self._hide_scroll_button()
+
+    def _show_scroll_button(self):
+        """显示回到底部按钮"""
+        if not self._scroll_btn_visible:
+            # 获取HTML框架的位置
+            try:
+                x = self._html_frame.winfo_x() + self._html_frame.winfo_width() - 60
+                y = self._html_frame.winfo_y() + self._html_frame.winfo_height() - 60
+                self._scroll_btn_canvas.place(x=x, y=y)
+                self._scroll_btn_visible = True
+            except Exception:
+                pass
+
+    def _hide_scroll_button(self):
+        """隐藏回到底部按钮"""
+        if self._scroll_btn_visible:
+            self._scroll_btn_canvas.place_forget()
+            self._scroll_btn_visible = False
+
+    def _check_scroll_position(self):
+        """检查滚动位置，判断用户是否手动滚动"""
+        try:
+            pos = self._html_frame.yview()
+            if pos and len(pos) == 2:
+                current_pos = pos[1]
+                # 如果用户滚回底部（>=0.99），恢复自动跟随
+                if current_pos >= 0.99:
+                    self._user_scrolled = False
+                    self._hide_scroll_button()
+                # 如果位置明显不在底部，标记为用户已滚动
+                elif current_pos < 0.95:
+                    self._user_scrolled = True
+                    # 显示回到底部按钮
+                    self._show_scroll_button()
+                self._last_scroll_pos = current_pos
         except Exception:
             pass
 
@@ -321,6 +388,8 @@ class HtmlRenderer:
         if self._scroll_check_id:
             self.parent.after_cancel(self._scroll_check_id)
             self._scroll_check_id = None
+        # 隐藏回到底部按钮
+        self._hide_scroll_button()
         self._load_empty()
 
     def get_content(self) -> str:
