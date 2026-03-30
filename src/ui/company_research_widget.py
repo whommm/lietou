@@ -23,114 +23,61 @@ class CompanyResearchWidget(ctk.CTkFrame):
 
     def _setup_ui(self):
         """设置UI布局"""
-        self.grid_columnconfigure(0, weight=2)
-        self.grid_columnconfigure(1, weight=3)
-        self.grid_rowconfigure(0, weight=1)
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(1, weight=1)
 
-        self._build_input_panel()
+        self._build_input_bar()
         self._build_result_panel()
 
-    def _build_input_panel(self):
-        """构建搜索输入面板"""
-        input_frame = ctk.CTkFrame(self)
-        input_frame.grid(row=0, column=0, padx=(10, 5), pady=10, sticky="nsew")
-        input_frame.grid_columnconfigure(0, weight=1)
-        input_frame.grid_rowconfigure(3, weight=1)
+    def _build_input_bar(self):
+        """构建顶部输入栏"""
+        input_bar = ctk.CTkFrame(self, fg_color="transparent")
+        input_bar.grid(row=0, column=0, padx=10, pady=(10, 5), sticky="ew")
+        input_bar.grid_columnconfigure(1, weight=1)
 
-        # 标题
-        title_label = ctk.CTkLabel(
-            input_frame,
-            text="公司深度调研",
-            font=ctk.CTkFont(size=16, weight="bold")
-        )
-        title_label.grid(row=0, column=0, padx=10, pady=(10, 5), sticky="w")
-
-        # 描述
-        desc_label = ctk.CTkLabel(
-            input_frame,
-            text="输入公司名称，自动搜索并生成深度调研报告",
-            font=ctk.CTkFont(size=12),
-            text_color=("gray50", "gray60")
-        )
-        desc_label.grid(row=1, column=0, padx=10, pady=(0, 10), sticky="w")
-
-        # 公司名称输入
-        ctk.CTkLabel(input_frame, text="公司名称:").grid(
-            row=2, column=0, padx=10, pady=(10, 5), sticky="w"
+        # 标签
+        ctk.CTkLabel(input_bar, text="公司名称:", font=ctk.CTkFont(size=13)).grid(
+            row=0, column=0, padx=(0, 8)
         )
 
+        # 输入框
         self.company_entry = ctk.CTkEntry(
-            input_frame,
+            input_bar,
             placeholder_text="请输入公司名称，如：华为、字节跳动、Tesla"
         )
-        self.company_entry.grid(row=3, column=0, padx=10, pady=(0, 10), sticky="ew")
+        self.company_entry.grid(row=0, column=1, sticky="ew")
 
-        # 按钮区
-        btn_frame = ctk.CTkFrame(input_frame, fg_color="transparent")
-        btn_frame.grid(row=4, column=0, padx=10, pady=(0, 10), sticky="ew")
-        btn_frame.grid_columnconfigure(0, weight=1)
-
-        self.clear_btn = ctk.CTkButton(
-            btn_frame,
-            text="清空",
-            width=60,
-            fg_color="gray",
-            command=self._on_clear_click
-        )
-        self.clear_btn.grid(row=0, column=0, padx=5, sticky="w")
-
+        # 调研按钮
         self.research_btn = ctk.CTkButton(
-            btn_frame,
-            text="开始深度调研",
-            command=self._on_research_click
+            input_bar, text="开始调研", width=100, command=self._on_research_click
         )
-        self.research_btn.grid(row=0, column=1, padx=5, sticky="e")
-
-    def _build_result_panel(self):
-        """构建结果展示面板"""
-        result_frame = ctk.CTkFrame(self)
-        result_frame.grid(row=0, column=1, padx=(5, 10), pady=10, sticky="nsew")
-        result_frame.grid_columnconfigure(0, weight=1)
-        result_frame.grid_rowconfigure(1, weight=1)
-
-        # 标题栏
-        header_frame = ctk.CTkFrame(result_frame, fg_color="transparent")
-        header_frame.grid(row=0, column=0, padx=10, pady=(10, 5), sticky="ew")
-        header_frame.grid_columnconfigure(0, weight=1)
-
-        ctk.CTkLabel(
-            header_frame,
-            text="调研报告",
-            font=ctk.CTkFont(size=14, weight="bold")
-        ).pack(side="left")
-
-        # 按钮区
-        btn_frame = ctk.CTkFrame(header_frame, fg_color="transparent")
-        btn_frame.pack(side="right")
+        self.research_btn.grid(row=0, column=2, padx=(8, 0))
 
         # 复制按钮
         self.copy_btn = ctk.CTkButton(
-            btn_frame, text="复制全部", width=80, height=28,
+            input_bar, text="复制", width=60, fg_color="gray",
             command=self._on_copy_click
         )
-        self.copy_btn.pack(side="right", padx=5)
+        self.copy_btn.grid(row=0, column=3, padx=(8, 0))
 
         # 清空按钮
-        self.clear_result_btn = ctk.CTkButton(
-            btn_frame, text="清空", width=60, height=28,
-            fg_color="gray", command=self._on_clear_result_click
+        self.clear_btn = ctk.CTkButton(
+            input_bar, text="清空", width=60, fg_color="gray",
+            command=self._on_clear_click
         )
-        self.clear_result_btn.pack(side="right", padx=5)
+        self.clear_btn.grid(row=0, column=4, padx=(8, 0))
 
         # 历史按钮
         self.history_btn = ctk.CTkButton(
-            btn_frame, text="历史", width=60, height=28,
+            input_bar, text="历史", width=60, fg_color="gray",
             command=self._on_history_click
         )
-        self.history_btn.pack(side="right", padx=5)
+        self.history_btn.grid(row=0, column=5, padx=(8, 0))
 
+    def _build_result_panel(self):
+        """构建结果展示面板"""
         # HTML渲染器
-        self.html_renderer = HtmlRenderer(result_frame, theme=self.theme)
+        self.html_renderer = HtmlRenderer(self, theme=self.theme)
         self.html_renderer.grid(row=1, column=0, padx=10, pady=(5, 10), sticky="nsew")
 
         # 历史面板（延迟创建）
@@ -153,7 +100,7 @@ class CompanyResearchWidget(ctk.CTkFrame):
 
         if self.history_panel is None:
             self.history_panel = HistoryPanel(
-                self.html_renderer.parent,
+                self,
                 history_manager=self.history_manager,
                 on_load_record=self._on_load_history
             )
@@ -198,10 +145,6 @@ class CompanyResearchWidget(ctk.CTkFrame):
 
     def _on_clear_click(self):
         """清空按钮点击事件"""
-        self.company_entry.delete(0, "end")
-
-    def _on_clear_result_click(self):
-        """清空结果按钮点击事件"""
         self._result_buffer = ""
         self.html_renderer.clear()
 
@@ -224,11 +167,9 @@ class CompanyResearchWidget(ctk.CTkFrame):
         if researching:
             self.research_btn.configure(state="disabled", text="调研中...")
             self.company_entry.configure(state="disabled")
-            self.clear_btn.configure(state="disabled")
         else:
-            self.research_btn.configure(state="normal", text="开始深度调研")
+            self.research_btn.configure(state="normal", text="开始调研")
             self.company_entry.configure(state="normal")
-            self.clear_btn.configure(state="normal")
 
     def append_result(self, text: str):
         """追加结果文本"""
