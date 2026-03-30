@@ -261,38 +261,7 @@ RESUME_MATCH_PROMPT = """你是一位资深猎头顾问，现在需要评估候�
 
 COMPANY_RESEARCH_PROMPT = """你是一位资深猎头顾问，现在需要对目标公司进行深度调研。
 
-请使用HTML标签和CSS类来组织内容，让输出更加精美可视化。可用的CSS类包括：
-
-**卡片类：**
-- `<div class="card card-blue">...</div>` - 蓝色渐变卡片
-- `<div class="card card-green">...</div>` - 绿色渐变卡片
-- `<div class="card card-orange">...</div>` - 粉色渐变卡片
-- `<div class="card card-purple">...</div>` - 青色渐变卡片
-
-**特性卡片网格：**
-```html
-<div class="feature-grid">
-  <div class="feature-card"><div class="feature-icon">🎯</div><div class="feature-title">标题</div><div class="feature-desc">描述</div></div>
-</div>
-```
-
-**标签类：**
-- `<a href="copy://标签" class="tag tag-blue" title="点击复制">标签</a>` - 蓝色标签
-
-**提示框类：**
-- `<div class="alert alert-success">...</div>` - 成功提示
-- `<div class="alert alert-warning">...</div>` - 警告提示
-- `<div class="alert alert-info">...</div>` - 信息提示
-
-**进度条类：**
-```html
-<div class="progress-container">
-  <div class="progress-label"><span>指标</span><span>值</span></div>
-  <div class="progress-bar">
-    <div class="progress-fill progress-blue" style="width: 80%;"></div>
-  </div>
-</div>
-```
+请使用纯文本格式输出，使用Markdown格式（#标题、**加粗**、- 列表等）来组织内容。
 
 公司名称: {company_name}
 
@@ -304,108 +273,53 @@ COMPANY_RESEARCH_PROMPT = """你是一位资深猎头顾问，现在需要对目
 
 ---
 
-请基于以上信息，生成一份专业的公司调研报告。
-
-<div class="card card-blue">
+请基于以上信息，生成一份专业的公司调研报告，按以下结构输出：
 
 ## 🏢 公司概况
 
-</div>
-
-<div class="feature-grid">
-  <div class="feature-card"><div class="feature-icon">📅</div><div class="feature-title">成立时间</div><div class="feature-desc">[具体年份]</div></div>
-  <div class="feature-card"><div class="feature-icon">📍</div><div class="feature-title">总部地点</div><div class="feature-desc">[具体位置]</div></div>
-  <div class="feature-card"><div class="feature-icon">👥</div><div class="feature-title">员工规模</div><div class="feature-desc">[员工数量]</div></div>
-  <div class="feature-card"><div class="feature-icon">💰</div><div class="feature-title">融资情况</div><div class="feature-desc">[融资轮次/金额]</div></div>
-</div>
-
----
-
-<div class="card card-green">
+- 成立时间：[具体年份]
+- 总部地点：[具体位置]
+- 员工规模：[员工数量]
+- 融资情况：[融资轮次/金额]
+- 公司简介：[1-2句话概括]
 
 ## 💼 主营业务与产品
 
-</div>
-
-<div class="feature-grid">
-  <div class="feature-card"><div class="feature-icon">🎯</div><div class="feature-title">核心业务</div><div class="feature-desc">[业务描述]</div></div>
-  <div class="feature-card"><div class="feature-icon">📦</div><div class="feature-title">主要产品</div><div class="feature-desc">[产品列表]</div></div>
-  <div class="feature-card"><div class="feature-icon">🎪</div><div class="feature-title">目标客户</div><div class="feature-desc">[客户群体]</div></div>
-</div>
-
----
-
-<div class="card card-orange">
+- 核心业务：[业务描述]
+- 主要产品：[产品列表]
+- 目标客户：[客户群体]
 
 ## 🏆 行业地位与竞品
 
-</div>
-
-使用进度条展示市场地位：
-
-<div class="progress-container">
-  <div class="progress-label"><span>行业排名</span><span>Top [排名]</span></div>
-  <div class="progress-bar">
-    <div class="progress-fill progress-orange" style="width: [百分比]%;"></div>
-  </div>
-</div>
-
-**主要竞争对手：**
-<div class="tag-cloud">
-  <a href="copy://竞品1" class="tag tag-orange" title="点击复制">竞品1</a>
-  <a href="copy://竞品2" class="tag tag-orange" title="点击复制">竞品2</a>
-</div>
-
----
-
-<div class="card card-purple">
+- 行业排名：[排名情况]
+- 主要竞争对手：[竞品1、竞品2等]
+- 竞争优势：[核心优势]
 
 ## 📰 最新动态
 
-</div>
-
 列出近期重要新闻（6个月内）
-
----
-
-<div class="card card-green">
 
 ## 🏛️ 组织架构与文化
 
-</div>
-
----
-
-<div class="alert alert-success">
+- 组织架构：[架构特点]
+- 企业文化：[文化特色]
 
 ## 💡 猎头视角建议
-
-</div>
 
 **招聘岗位类型：**[常见招聘岗位]
 
 **吸引力：**
-<div class="feature-grid">
-  <div class="feature-card"><div class="feature-icon">✅</div><div class="feature-title">优势1</div><div class="feature-desc">[具体描述]</div></div>
-</div>
+- [优势1]
+- [优势2]
 
 **风险点：**
-<div class="alert alert-warning">
-  [需要关注的风险]
-</div>
+- [需要关注的风险]
 
 **沟通话题：**
-<div class="steps">
-  <div class="step"><div class="step-number">1</div><div class="step-content"><div class="step-title">话题1</div><div class="step-desc">[具体描述]</div></div></div>
-</div>
-
----
-
-<div class="card card-gray">
+1. [话题1]
+2. [话题2]
 
 ## 📚 信息来源
-
-</div>
 
 列出本次调研使用的主要信息来源URL
 """
