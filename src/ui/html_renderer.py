@@ -11,22 +11,15 @@ class HtmlRenderer:
     """HTML渲染器 - 支持Markdown转换和流式输出"""
 
     def __init__(self, parent: tk.Widget, theme: str = "light"):
-        """
-        初始化HTML渲染器
-
-        Args:
-            parent: 父容器
-            theme: 主题名称 ("light" 或 "dark")
-        """
         self.parent = parent
         self.theme = theme
 
         # Markdown转换器
         self._md = markdown.Markdown(extensions=[
-            'tables',        # 表格支持
-            'fenced_code',   # 代码块支持
-            'nl2br',         # 换行转换
-            'sane_lists',    # 更好的列表支持
+            'tables',
+            'fenced_code',
+            'nl2br',
+            'sane_lists',
         ])
 
         # 流式输出缓冲区
@@ -34,164 +27,152 @@ class HtmlRenderer:
         self._last_rendered_len = 0
         self._is_streaming = False
         self._initialized = False
-        self._user_scrolled = False  # 用户是否手动滚动过
-        self._last_scroll_pos = 1.0  # 上次滚动位置
-        self._scroll_check_id = None  # 定时检查滚动位置的ID
+        self._auto_scroll = True  # 是否自动滚动到底部
+        self._scroll_check_id = None
+
+        # 创建主容器
+        self._container = tk.Frame(parent)
+        self._container.grid_columnconfigure(0, weight=1)
+        self._container.grid_rowconfigure(0, weight=1)
 
         # 创建HTML框架
         self._html_frame = HtmlFrame(
-            parent,
+            self._container,
             messages_enabled=False,
             vertical_scrollbar=True,
             on_link_click=self._handle_link_click,
         )
+        self._html_frame.grid(row=0, column=0, sticky="nsew")
 
-        # 绑定多种滚动事件检测用户滚动
-        self._html_frame.bind('<MouseWheel>', self._on_user_scroll)  # Windows滚轮
-        self._html_frame.bind('<Button-4>', self._on_user_scroll)    # Linux滚轮上
-        self._html_frame.bind('<Button-5>', self._on_user_scroll)    # Linux滚轮下
+        # 创建浮动按钮（放在容器右下角）
+        self._scroll_down_btn = tk.Button(
+            self._container,
+            text="⬇",
+            font=("Arial", 16),
+            bg="#4CAF50" if theme == "light" else "#667eea",
+            fg="white",
+            relief="flat",
+            cursor="hand2",
+            command=self._on_scroll_down_click,
+            width=3,
+            height=1
+        )
+        # 初始隐藏
+        self._btn_visible = False
 
-        # 绑定Configure事件检测内容变化
-        self._html_frame.bind('<Configure>', self._on_configure)
+        # 绑定滚动事件到HtmlFrame及其子组件
+        self._bind_scroll_events()
 
-        # 创建浮动回到底部按钮
-        self._scroll_btn = None
-        self._scroll_btn_visible = False
-        self._create_scroll_button()
-
-        # 加载初始空白内容
+        # 加载初始内容
         self._load_empty()
 
-        # 启动定期滚动位置检查
-        self._start_scroll_check()
+    def _bind_scroll_events(self):
+        """绑定滚动事件"""
+        # 绑定到HtmlFrame本身
+        self._html_frame.bind('<MouseWheel>', self._on_scroll)
+        self._html_frame.bind('<Button-4>', self._on_scroll_up)
+        self._html_frame.bind('<Button-5>', self._on_scroll_down)
+
+        # 延迟绑定到内部组件
+        self._container.after(500, self._bind_inner_scroll_events)
+
+    def _bind_inner_scroll_events(self):
+        """绑定到HtmlFrame内部组件的滚动事件"""
+        try:
+            # 遍历HtmlFrame的所有子组件并绑定滚动事件
+            def bind_recursive(widget):
+                try:
+                    widget.bind('<MouseWheel>', self._on_scroll)
+                    widget.bind('<Button-4>', self._on_scroll_up)
+                    widget.bind('<Button-5>', self._on_scroll_down)
+                except Exception:
+                    pass
+                for child in widget.winfo_children():
+                    bind_recursive(child)
+
+            bind_recursive(self._html_frame)
+        except Exception:
+            pass
+
+    def _on_scroll(self, event=None):
+        """Windows滚轮事件"""
+        if event and event.delta < 0:
+            # 向下滚动
+            self._on_user_scroll_down()
+        elif event and event.delta > 0:
+            # 向上滚动
+            self._on_user_scroll_up()
+
+    def _on_scroll_up(self, event=None):
+        """Linux向上滚轮"""
+        self._on_user_scroll_up()
+
+    def _on_scroll_down(self, event=None):
+        """Linux向下滚轮"""
+        self._on_user_scroll_down()
+
+    def _on_user_scroll_up(self):
+        """用户向上滚动"""
+        self._auto_scroll = False
+        self._show_scroll_button()
+
+    def _on_user_scroll_down(self):
+        """用户向下滚动"""
+        # 延迟检查是否已到底部
+        self._container.after(100, self._check_if_at_bottom)
+
+    def _check_if_at_bottom(self):
+        """检查是否已滚动到底部"""
+        try:
+            pos = self._html_frame.yview()
+            if pos and len(pos) == 2 and pos[1] >= 0.98:
+                # 已到底部，恢复自动滚动
+                self._auto_scroll = True
+                self._hide_scroll_button()
+            else:
+                # 未到底部
+                self._auto_scroll = False
+                self._show_scroll_button()
+        except Exception:
+            pass
+
+    def _on_scroll_down_click(self):
+        """点击滚动到底部按钮"""
+        self._scroll_to_bottom()
+        self._auto_scroll = True
+        self._hide_scroll_button()
+
+    def _show_scroll_button(self):
+        """显示滚动按钮"""
+        if not self._btn_visible:
+            self._scroll_down_btn.place(relx=1.0, rely=1.0, x=-20, y=-20, anchor="se")
+            self._btn_visible = True
+
+    def _hide_scroll_button(self):
+        """隐藏滚动按钮"""
+        if self._btn_visible:
+            self._scroll_down_btn.place_forget()
+            self._btn_visible = False
+
+    def _scroll_to_bottom(self):
+        """滚动到底部"""
+        try:
+            self._html_frame.yview_moveto(1.0)
+        except Exception:
+            pass
 
     def _handle_link_click(self, url: str) -> bool:
         """处理HTML中的链接点击事件"""
         if url.startswith("copy://"):
             import urllib.parse
             import pyperclip
-            from tkinter import messagebox
             try:
-                # 解析URL编码的文本
                 text = urllib.parse.unquote(url[7:])
                 pyperclip.copy(text)
-                # 可选：如果你想给用户更明显的反馈，可以取消下面这行的注释
-                # messagebox.showinfo("成功", f"已复制: {text}")
             except Exception:
                 pass
-            return False  # 返回False阻止默认跳转
-        return True  # 其他链接允许默认处理
-
-    def _on_user_scroll(self, event=None):
-        """用户滚动时的回调"""
-        # 立即检查滚动位置
-        self._check_scroll_position()
-
-    def _on_configure(self, event=None):
-        """组件大小变化时的回调"""
-        # 内容变化时检查滚动位置
-        if self._is_streaming and not self._user_scrolled:
-            self._scroll_to_bottom()
-
-    def _start_scroll_check(self):
-        """启动定期滚动位置检查"""
-        if self._scroll_check_id:
-            self.parent.after_cancel(self._scroll_check_id)
-        # 每200ms检查一次滚动位置
-        self._scroll_check_id = self.parent.after(200, self._periodic_scroll_check)
-
-    def _periodic_scroll_check(self):
-        """定期检查滚动位置"""
-        if self._is_streaming:
-            self._check_scroll_position()
-        # 继续下一次检查
-        self._scroll_check_id = self.parent.after(200, self._periodic_scroll_check)
-
-    def _scroll_to_bottom(self):
-        """滚动到底部"""
-        try:
-            # 使用yview_moveto滚动到底部
-            self._html_frame.yview_moveto(1.0)
-        except Exception:
-            pass
-
-    def _create_scroll_button(self):
-        """创建浮动回到底部按钮"""
-        # 使用Canvas作为浮动按钮容器
-        self._scroll_btn_canvas = tk.Canvas(
-            self.parent,
-            width=40,
-            height=40,
-            highlightthickness=0,
-            bg='#4CAF50' if self.theme == 'light' else '#667eea'
-        )
-        # 绘制向下箭头
-        self._draw_arrow()
-        # 绑定点击事件
-        self._scroll_btn_canvas.bind('<Button-1>', self._on_scroll_btn_click)
-        # 初始隐藏
-        self._scroll_btn_visible = False
-
-    def _draw_arrow(self):
-        """绘制向下箭头"""
-        self._scroll_btn_canvas.delete('all')
-        # 绘制圆形背景
-        self._scroll_btn_canvas.create_oval(
-            5, 5, 35, 35,
-            fill='#4CAF50' if self.theme == 'light' else '#667eea',
-            outline=''
-        )
-        # 绘制向下箭头
-        self._scroll_btn_canvas.create_line(
-            20, 12, 20, 28,
-            fill='white', width=2, arrow='last', arrowshape=(8, 10, 5)
-        )
-
-    def _on_scroll_btn_click(self, event=None):
-        """回到底部按钮点击事件"""
-        # 滚动到底部
-        self._scroll_to_bottom()
-        # 恢复自动跟随
-        self._user_scrolled = False
-        # 隐藏按钮
-        self._hide_scroll_button()
-
-    def _show_scroll_button(self):
-        """显示回到底部按钮"""
-        if not self._scroll_btn_visible:
-            # 获取HTML框架的位置
-            try:
-                x = self._html_frame.winfo_x() + self._html_frame.winfo_width() - 60
-                y = self._html_frame.winfo_y() + self._html_frame.winfo_height() - 60
-                self._scroll_btn_canvas.place(x=x, y=y)
-                self._scroll_btn_visible = True
-            except Exception:
-                pass
-
-    def _hide_scroll_button(self):
-        """隐藏回到底部按钮"""
-        if self._scroll_btn_visible:
-            self._scroll_btn_canvas.place_forget()
-            self._scroll_btn_visible = False
-
-    def _check_scroll_position(self):
-        """检查滚动位置，判断用户是否手动滚动"""
-        try:
-            pos = self._html_frame.yview()
-            if pos and len(pos) == 2:
-                current_pos = pos[1]
-                # 如果用户滚回底部（>=0.99），恢复自动跟随
-                if current_pos >= 0.99:
-                    self._user_scrolled = False
-                    self._hide_scroll_button()
-                # 如果位置明显不在底部，标记为用户已滚动
-                elif current_pos < 0.95:
-                    self._user_scrolled = True
-                    # 显示回到底部按钮
-                    self._show_scroll_button()
-                self._last_scroll_pos = current_pos
-        except Exception:
-            pass
+            return False
+        return True
 
     def _get_css(self) -> str:
         """获取当前主题的CSS"""
@@ -206,37 +187,22 @@ class HtmlRenderer:
     <meta charset="UTF-8">
     <style>
         {css}
-        /* overflow-anchor 自动保持滚动位置 */
-        html {{
-            overflow-anchor: none;
-        }}
-        body {{
-            overflow-anchor: none;
-        }}
-        #content-anchor {{
+        html, body {{
             overflow-anchor: auto;
-            width: 100%;
         }}
-        /* 滚动条样式 */
         ::-webkit-scrollbar {{
             width: 8px;
-            height: 8px;
         }}
         ::-webkit-scrollbar-track {{
             background: {'#2d2d2d' if self.theme == 'dark' else '#f1f1f1'};
-            border-radius: 4px;
         }}
         ::-webkit-scrollbar-thumb {{
             background: {'#555' if self.theme == 'dark' else '#c1c1c1'};
             border-radius: 4px;
         }}
-        ::-webkit-scrollbar-thumb:hover {{
-            background: {'#777' if self.theme == 'dark' else '#a1a1a1'};
-        }}
     </style>
 </head>
 <body>
-<div id="content-anchor"></div>
 {body_content}
 </body>
 </html>"""
@@ -248,48 +214,42 @@ class HtmlRenderer:
 
     def grid(self, **kwargs):
         """网格布局"""
-        self._html_frame.grid(**kwargs)
+        self._container.grid(**kwargs)
 
     def grid_forget(self):
         """取消网格布局"""
-        self._html_frame.grid_forget()
+        self._container.grid_forget()
 
     def pack(self, **kwargs):
         """打包布局"""
-        self._html_frame.pack(**kwargs)
+        self._container.pack(**kwargs)
 
     def pack_forget(self):
         """取消打包布局"""
-        self._html_frame.pack_forget()
+        self._container.pack_forget()
 
     def place(self, **kwargs):
         """位置布局"""
-        self._html_frame.place(**kwargs)
+        self._container.place(**kwargs)
 
     def place_forget(self):
         """取消位置布局"""
-        self._html_frame.place_forget()
+        self._container.place_forget()
 
     def destroy(self):
         """销毁组件"""
-        self._html_frame.destroy()
+        if self._scroll_check_id:
+            self._container.after_cancel(self._scroll_check_id)
+        self._container.destroy()
 
     def set_content(self, markdown_text: str):
-        """
-        设置Markdown内容并渲染为HTML
-
-        Args:
-            markdown_text: Markdown格式的文本
-        """
+        """设置Markdown内容并渲染为HTML"""
         if not markdown_text or not markdown_text.strip():
             self._load_empty()
             return
 
-        # 转换Markdown为HTML
         self._md.reset()
         html_body = self._md.convert(markdown_text)
-
-        # 加载完整的HTML
         full_html = self._wrap_html(html_body)
         self._html_frame.load_html(full_html)
 
@@ -299,9 +259,12 @@ class HtmlRenderer:
         self._last_rendered_len = 0
         self._is_streaming = True
         self._initialized = False
-        self._user_scrolled = False
-        self._last_scroll_pos = 1.0
+        self._auto_scroll = True
         self._md.reset()
+
+        # 隐藏按钮
+        self._hide_scroll_button()
+
         # 显示加载状态
         loading_html = self._wrap_html(
             '<div style="text-align: center; padding: 20px; color: #667eea;">'
@@ -310,27 +273,50 @@ class HtmlRenderer:
             '</div>'
         )
         self._html_frame.load_html(loading_html)
+
         # 启动滚动检查
         self._start_scroll_check()
 
-    def append_chunk(self, chunk: str):
-        """
-        追加流式文本块
+    def _start_scroll_check(self):
+        """启动定期滚动检查"""
+        if self._scroll_check_id:
+            self._container.after_cancel(self._scroll_check_id)
+        self._scroll_check_id = self._container.after(300, self._periodic_scroll_check)
 
-        Args:
-            chunk: 新的文本片段
-        """
+    def _periodic_scroll_check(self):
+        """定期检查滚动位置"""
+        if self._is_streaming:
+            # 检查当前滚动位置
+            try:
+                pos = self._html_frame.yview()
+                if pos and len(pos) == 2:
+                    # 如果不在底部且自动滚动开启，说明用户向上滚动了
+                    if pos[1] < 0.95 and self._auto_scroll:
+                        self._auto_scroll = False
+                        self._show_scroll_button()
+                    # 如果在底部，恢复自动滚动
+                    elif pos[1] >= 0.98:
+                        self._auto_scroll = True
+                        self._hide_scroll_button()
+            except Exception:
+                pass
+
+            # 继续检查
+            self._scroll_check_id = self._container.after(300, self._periodic_scroll_check)
+
+    def append_chunk(self, chunk: str):
+        """追加流式文本块"""
         if not self._is_streaming:
             self.start_stream()
 
         self._buffer += chunk
 
-        # 增加更新间隔到1500字符，减少重新加载频率
+        # 增加更新间隔，减少重新加载频率
         if len(self._buffer) - self._last_rendered_len > 1500:
             self._update_stream_display()
 
     def _update_stream_display(self):
-        """更新流式显示内容 - 使用DOM innerHTML"""
+        """更新流式显示内容"""
         if not self._buffer:
             return
 
@@ -345,50 +331,51 @@ class HtmlRenderer:
         self._last_rendered_len = len(self._buffer)
 
         if not self._initialized:
-            # 首次加载完整页面，包含内容容器
             full_html = self._wrap_html('<div id="stream-content"></div>')
             self._html_frame.load_html(full_html)
             self._initialized = True
 
-        # 使用DOM API更新内容容器
+        # 使用DOM API更新内容
         try:
             content_elem = self._html_frame.document.getElementById('stream-content')
             if content_elem:
                 content_elem.innerHTML = html_body
         except Exception:
-            # DOM更新失败，回退到重新加载
             full_html = self._wrap_html(html_body)
             self._html_frame.load_html(full_html)
 
-        # 智能滚动：用户没手动滚动过则跟随底部
-        if not self._user_scrolled:
-            # 使用after延迟滚动，确保DOM已更新
-            self.parent.after(100, self._scroll_to_bottom)
+        # 自动滚动到底部
+        if self._auto_scroll:
+            self._container.after(50, self._scroll_to_bottom)
 
     def finish_stream(self):
-        """完成流式输出，进行最终渲染"""
+        """完成流式输出"""
         self._is_streaming = False
+
         # 停止滚动检查
         if self._scroll_check_id:
-            self.parent.after_cancel(self._scroll_check_id)
+            self._container.after_cancel(self._scroll_check_id)
             self._scroll_check_id = None
+
         self._update_stream_display()
         self._md.reset()
+
         # 最终滚动到底部
-        self._scroll_to_bottom()
+        if self._auto_scroll:
+            self._scroll_to_bottom()
 
     def clear(self):
         """清空内容"""
         self._buffer = ""
         self._md.reset()
         self._is_streaming = False
-        self._user_scrolled = False
-        self._last_scroll_pos = 1.0
+        self._auto_scroll = True
+
         # 停止滚动检查
         if self._scroll_check_id:
-            self.parent.after_cancel(self._scroll_check_id)
+            self._container.after_cancel(self._scroll_check_id)
             self._scroll_check_id = None
-        # 隐藏回到底部按钮
+
         self._hide_scroll_button()
         self._load_empty()
 
@@ -397,16 +384,17 @@ class HtmlRenderer:
         return self._buffer
 
     def set_theme(self, theme: str):
-        """
-        切换主题
-
-        Args:
-            theme: 主题名称 ("light" 或 "dark")
-        """
+        """切换主题"""
         if theme not in ("light", "dark"):
             return
 
         self.theme = theme
+
+        # 更新按钮颜色
+        self._scroll_down_btn.configure(
+            bg="#4CAF50" if theme == "light" else "#667eea"
+        )
+
         # 重新渲染当前内容
         if self._buffer:
             self._update_stream_display()
@@ -424,26 +412,11 @@ class HtmlRenderer:
 
 
 class HtmlResultWidget(HtmlRenderer):
-    """
-    HTML结果显示组件 - 带工具栏
-    用于替换原有的CTkTextbox，提供更丰富的内容显示
-    """
+    """HTML结果显示组件 - 带工具栏"""
 
     def __init__(self, parent: tk.Widget, theme: str = "light",
                  on_copy=None, on_clear=None, on_export=None):
-        """
-        初始化HTML结果组件
-
-        Args:
-            parent: 父容器
-            theme: 主题名称
-            on_copy: 复制回调
-            on_clear: 清空回调
-            on_export: 导出回调
-        """
-        # 先初始化基类
         super().__init__(parent, theme)
-
         self._on_copy = on_copy
         self._on_clear = on_clear
         self._on_export = on_export
