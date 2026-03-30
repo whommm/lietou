@@ -68,31 +68,10 @@ class HtmlRenderer:
 
     def _bind_scroll_events(self):
         """绑定滚动事件"""
-        # 绑定到HtmlFrame本身
+        # 只绑定到HtmlFrame本身
         self._html_frame.bind('<MouseWheel>', self._on_scroll)
         self._html_frame.bind('<Button-4>', self._on_scroll_up)
         self._html_frame.bind('<Button-5>', self._on_scroll_down)
-
-        # 延迟绑定到内部组件
-        self._container.after(500, self._bind_inner_scroll_events)
-
-    def _bind_inner_scroll_events(self):
-        """绑定到HtmlFrame内部组件的滚动事件"""
-        try:
-            # 遍历HtmlFrame的所有子组件并绑定滚动事件
-            def bind_recursive(widget):
-                try:
-                    widget.bind('<MouseWheel>', self._on_scroll)
-                    widget.bind('<Button-4>', self._on_scroll_up)
-                    widget.bind('<Button-5>', self._on_scroll_down)
-                except Exception:
-                    pass
-                for child in widget.winfo_children():
-                    bind_recursive(child)
-
-            bind_recursive(self._html_frame)
-        except Exception:
-            pass
 
     def _on_scroll(self, event=None):
         """Windows滚轮事件"""
