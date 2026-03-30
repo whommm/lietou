@@ -194,7 +194,9 @@ class ResumeMatchWidget(ctk.CTkFrame):
     def append_result(self, text: str):
         """追加结果文本"""
         self._result_buffer += text
-        # 直接更新HTML渲染器（与岗位分析一致）
+        # 使用append_chunk，但每次都触发更新
+        if not self.html_renderer._is_streaming:
+            self.html_renderer.start_stream()
         self.html_renderer._buffer += text
         self.html_renderer._update_stream_display()
 
