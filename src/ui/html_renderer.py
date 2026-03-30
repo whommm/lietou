@@ -35,6 +35,8 @@ class HtmlRenderer:
         self._is_streaming = False
         self._initialized = False
         self._user_scrolled = False  # 用户是否手动滚动过
+        self._last_scroll_pos = 1.0  # 上次滚动位置
+        self._scroll_check_id = None  # 定时检查滚动位置的ID
 
         # 创建HTML框架
         self._html_frame = HtmlFrame(
@@ -44,11 +46,19 @@ class HtmlRenderer:
             on_link_click=self._handle_link_click,
         )
 
-        # 绑定鼠标滚轮事件检测用户滚动
-        self._html_frame.bind('<MouseWheel>', self._on_user_scroll)
+        # 绑定多种滚动事件检测用户滚动
+        self._html_frame.bind('<MouseWheel>', self._on_user_scroll)  # Windows滚轮
+        self._html_frame.bind('<Button-4>', self._on_user_scroll)    # Linux滚轮上
+        self._html_frame.bind('<Button-5>', self._on_user_scroll)    # Linux滚轮下
+
+        # 绑定Configure事件检测内容变化
+        self._html_frame.bind('<Configure>', self._on_configure)
 
         # 加载初始空白内容
         self._load_empty()
+
+        # 启动定期滚动位置检查
+        self._start_scroll_check()
 
     def _handle_link_click(self, url: str) -> bool:
         """处理HTML中的链接点击事件"""
@@ -69,16 +79,52 @@ class HtmlRenderer:
 
     def _on_user_scroll(self, event=None):
         """用户滚动时的回调"""
-        # 检测是否滚回底部
+        # 立即检查滚动位置
+        self._check_scroll_position()
+
+    def _on_configure(self, event=None):
+        """组件大小变化时的回调"""
+        # 内容变化时检查滚动位置
+        if self._is_streaming and not self._user_scrolled:
+            self._scroll_to_bottom()
+
+    def _check_scroll_position(self):
+        """检查滚动位置，判断用户是否手动滚动"""
         try:
             pos = self._html_frame.yview()
-            if pos and len(pos) == 2 and pos[1] >= 0.98:
-                # 用户滚回底部，恢复自动跟随
-                self._user_scrolled = False
-            else:
-                self._user_scrolled = True
+            if pos and len(pos) == 2:
+                current_pos = pos[1]
+                # 如果用户滚回底部（>=0.99），恢复自动跟随
+                if current_pos >= 0.99:
+                    self._user_scrolled = False
+                # 如果位置明显不在底部，标记为用户已滚动
+                elif current_pos < 0.95:
+                    self._user_scrolled = True
+                self._last_scroll_pos = current_pos
         except Exception:
-            self._user_scrolled = True
+            pass
+
+    def _start_scroll_check(self):
+        """启动定期滚动位置检查"""
+        if self._scroll_check_id:
+            self.parent.after_cancel(self._scroll_check_id)
+        # 每200ms检查一次滚动位置
+        self._scroll_check_id = self.parent.after(200, self._periodic_scroll_check)
+
+    def _periodic_scroll_check(self):
+        """定期检查滚动位置"""
+        if self._is_streaming:
+            self._check_scroll_position()
+        # 继续下一次检查
+        self._scroll_check_id = self.parent.after(200, self._periodic_scroll_check)
+
+    def _scroll_to_bottom(self):
+        """滚动到底部"""
+        try:
+            # 使用yview_moveto滚动到底部
+            self._html_frame.yview_moveto(1.0)
+        except Exception:
+            pass
 
     def _get_css(self) -> str:
         """获取当前主题的CSS"""
@@ -187,6 +233,7 @@ class HtmlRenderer:
         self._is_streaming = True
         self._initialized = False
         self._user_scrolled = False
+        self._last_scroll_pos = 1.0
         self._md.reset()
         # 显示加载状态
         loading_html = self._wrap_html(
@@ -196,6 +243,8 @@ class HtmlRenderer:
             '</div>'
         )
         self._html_frame.load_html(loading_html)
+        # 启动滚动检查
+        self._start_scroll_check()
 
     def append_chunk(self, chunk: str):
         """
@@ -246,18 +295,32 @@ class HtmlRenderer:
 
         # 智能滚动：用户没手动滚动过则跟随底部
         if not self._user_scrolled:
-            self.parent.after(50, lambda: self._html_frame.yview_moveto(1.0))
+            # 使用after延迟滚动，确保DOM已更新
+            self.parent.after(100, self._scroll_to_bottom)
 
     def finish_stream(self):
         """完成流式输出，进行最终渲染"""
         self._is_streaming = False
+        # 停止滚动检查
+        if self._scroll_check_id:
+            self.parent.after_cancel(self._scroll_check_id)
+            self._scroll_check_id = None
         self._update_stream_display()
         self._md.reset()
+        # 最终滚动到底部
+        self._scroll_to_bottom()
 
     def clear(self):
         """清空内容"""
         self._buffer = ""
         self._md.reset()
+        self._is_streaming = False
+        self._user_scrolled = False
+        self._last_scroll_pos = 1.0
+        # 停止滚动检查
+        if self._scroll_check_id:
+            self.parent.after_cancel(self._scroll_check_id)
+            self._scroll_check_id = None
         self._load_empty()
 
     def get_content(self) -> str:
