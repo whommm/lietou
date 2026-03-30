@@ -119,16 +119,16 @@ class MainWindow(ctk.CTk):
         self.tabview = ctk.CTkTabview(self)
         self.tabview.grid(row=1, column=0, padx=10, pady=5, sticky="nsew")
 
-        # 添加三个标签页
-        self.tab_job = self.tabview.add("岗位分析")
+        # 添加三个标签页（公司调研放在第一个）
         self.tab_company = self.tabview.add("公司调研")
+        self.tab_job = self.tabview.add("岗位分析")
         self.tab_resume = self.tabview.add("简历匹配")
-
-        # 构建岗位分析标签页内容
-        self._build_job_analysis_tab()
 
         # 构建公司调研标签页内容
         self._build_company_research_tab()
+
+        # 构建岗位分析标签页内容
+        self._build_job_analysis_tab()
 
         # 构建简历匹配标签页内容
         self._build_resume_match_tab()
