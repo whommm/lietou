@@ -7,52 +7,50 @@ DARK_CSS = """
 }
 
 body {
-    font-family: 'Microsoft YaHei', 'Segoe UI', Arial, sans-serif;
-    font-size: 18px;
-    color: #f0f0f0;
-    background-color: #1a1a2e;
-    line-height: 1.9;
-    padding: 15px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    font-size: 20px;
+    color: #e2e8f0;
+    background-color: #0f172a;
+    line-height: 1.6;
+    padding: 24px;
     margin: 0;
 }
 
 /* === 段落样式 === */
 p {
-    color: #f0f0f0;
-    margin: 10px 0;
+    color: #cbd5e1;
+    margin: 12px 0 16px 0;
 }
 
 /* === 标题样式 === */
+h1, h2, h3, h4, h5, h6 {
+    color: #f8fafc;
+    font-weight: 600;
+    line-height: 1.3;
+}
+
 h1 {
-    color: #ffffff;
-    font-size: 30px;
-    font-weight: 700;
-    margin: 15px 0 12px 0;
-    padding-bottom: 10px;
-    border-bottom: 3px solid #667eea;
+    font-size: 32px;
+    margin: 24px 0 16px 0;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #334155;
 }
 
 h2 {
-    color: #ffffff;
-    font-size: 24px;
-    font-weight: 700;
-    margin: 15px 0 10px 0;
-    padding-bottom: 8px;
-    border-bottom: 2px solid #3a3a5c;
+    font-size: 28px;
+    margin: 20px 0 12px 0;
+    padding-bottom: 6px;
+    border-bottom: 1px solid #1e293b;
 }
 
 h3 {
-    color: #e0e0e0;
-    font-size: 20px;
-    font-weight: 600;
-    margin: 12px 0 8px 0;
+    font-size: 24px;
+    margin: 16px 0 8px 0;
 }
 
 h4 {
-    color: #c0c0c0;
-    font-size: 18px;
-    font-weight: 600;
-    margin: 10px 0 6px 0;
+    font-size: 20px;
+    margin: 16px 0 8px 0;
 }
 
 /* === 渐变卡片 === */
@@ -132,15 +130,16 @@ h4 {
 
 /* === 进度条 === */
 .progress-container {
-    margin: 12px 0;
+    margin: 16px 0;
 }
 
 .progress-label {
     font-weight: 600;
-    margin-bottom: 6px;
+    margin-bottom: 8px;
     color: #e0e0e0;
     display: flex;
     justify-content: space-between;
+    font-size: 15px;
 }
 
 .progress-bar {
@@ -159,7 +158,7 @@ h4 {
     justify-content: center;
     color: white;
     font-weight: 600;
-    font-size: 12px;
+    font-size: 13px;
     text-shadow: 0 1px 2px rgba(0,0,0,0.3);
     transition: width 0.5s ease;
 }
@@ -283,16 +282,33 @@ h4 {
 .tag-cloud {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: 10px;
     margin: 12px 0;
 }
 
 .tag {
-    display: inline-block;
-    padding: 6px 14px;
-    border-radius: 20px;
-    font-size: 13px;
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 15px;
     font-weight: 500;
+    text-decoration: none;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+}
+
+.tag:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+    filter: brightness(1.1);
+    text-decoration: none;
+}
+
+.tag:active {
+    transform: translateY(0);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.2);
 }
 
 .tag-blue { background: #2d3a5c; color: #8ab4f8; border: 1px solid #667eea; }
@@ -337,13 +353,14 @@ tr:last-child td {
 
 /* === 列表样式 === */
 ul, ol {
-    padding-left: 25px;
-    margin: 10px 0;
+    padding-left: 35px;
+    margin: 14px 0;
 }
 
 li {
-    margin: 8px 0;
-    color: #f0f0f0;
+    margin: 12px 0;
+    color: #f5f5f5;
+    font-weight: 500;
 }
 
 /* === 强调文本 === */
@@ -364,10 +381,10 @@ li {
 /* === 代码块 === */
 code {
     background: #2d2d4a;
-    padding: 2px 8px;
+    padding: 3px 10px;
     border-radius: 4px;
     font-family: 'Consolas', 'Courier New', monospace;
-    font-size: 13px;
+    font-size: 16px;
     color: #f472b6;
 }
 

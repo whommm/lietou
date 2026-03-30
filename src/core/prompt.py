@@ -11,10 +11,10 @@ SYSTEM_PROMPT = """你现在是一位拥有10年经验的全行业资深猎头�
 - `<div class="card card-purple">...</div>` - 青色渐变卡片
 
 **标签类（用于关键词）：**
-- `<span class="tag tag-blue">关键词</span>` - 蓝色标签
-- `<span class="tag tag-green">关键词</span>` - 绿色标签
-- `<span class="tag tag-orange">关键词</span>` - 橙色标签
-- `<span class="tag tag-purple">关键词</span>` - 紫色标签
+- `<a href="copy://关键词" class="tag tag-blue" title="点击复制">关键词</a>` - 蓝色标签
+- `<a href="copy://关键词" class="tag tag-green" title="点击复制">关键词</a>` - 绿色标签
+- `<a href="copy://关键词" class="tag tag-orange" title="点击复制">关键词</a>` - 橙色标签
+- `<a href="copy://关键词" class="tag tag-purple" title="点击复制">关键词</a>` - 紫色标签
 
 **提示框类：**
 - `<div class="alert alert-success">...</div>` - 成功提示（绿色）
@@ -110,26 +110,26 @@ SYSTEM_PROMPT = """你现在是一位拥有10年经验的全行业资深猎头�
 
 **核心岗位词：**
 <div class="tag-cloud">
-  <span class="tag tag-blue">岗位名称1</span>
-  <span class="tag tag-blue">岗位名称2</span>
+  <a href="copy://岗位名称1" class="tag tag-blue" title="点击复制">岗位名称1</a>
+  <a href="copy://岗位名称2" class="tag tag-blue" title="点击复制">岗位名称2</a>
 </div>
 
 **核心技能词：**
 <div class="tag-cloud">
-  <span class="tag tag-green">技能1</span>
-  <span class="tag tag-green">技能2</span>
+  <a href="copy://技能1" class="tag tag-green" title="点击复制">技能1</a>
+  <a href="copy://技能2" class="tag tag-green" title="点击复制">技能2</a>
 </div>
 
 **行业/领域词：**
 <div class="tag-cloud">
-  <span class="tag tag-orange">行业1</span>
-  <span class="tag tag-orange">行业2</span>
+  <a href="copy://行业1" class="tag tag-orange" title="点击复制">行业1</a>
+  <a href="copy://行业2" class="tag tag-orange" title="点击复制">行业2</a>
 </div>
 
 **目标公司：**
 <div class="tag-cloud">
-  <span class="tag tag-purple">公司1</span>
-  <span class="tag tag-purple">公司2</span>
+  <a href="copy://公司1" class="tag tag-purple" title="点击复制">公司1</a>
+  <a href="copy://公司2" class="tag tag-purple" title="点击复制">公司2</a>
 </div>
 
 ---
@@ -169,9 +169,9 @@ RESUME_MATCH_PROMPT = """你是一位资深猎头顾问，现在需要评估候�
 ```
 
 **标签类：**
-- `<span class="tag tag-blue">标签</span>` - 蓝色标签
-- `<span class="tag tag-green">标签</span>` - 绿色标签
-- `<span class="tag tag-red">标签</span>` - 红色标签（用于不足）
+- `<a href="copy://标签" class="tag tag-blue" title="点击复制">标签</a>` - 蓝色标签
+- `<a href="copy://标签" class="tag tag-green" title="点击复制">标签</a>` - 绿色标签
+- `<a href="copy://标签" class="tag tag-red" title="点击复制">标签</a>` - 红色标签（用于不足）
 
 **提示框类：**
 - `<div class="alert alert-success">...</div>` - 成功提示
@@ -277,7 +277,7 @@ COMPANY_RESEARCH_PROMPT = """你是一位资深猎头顾问，现在需要对目
 ```
 
 **标签类：**
-- `<span class="tag tag-blue">标签</span>` - 蓝色标签
+- `<a href="copy://标签" class="tag tag-blue" title="点击复制">标签</a>` - 蓝色标签
 
 **提示框类：**
 - `<div class="alert alert-success">...</div>` - 成功提示
@@ -352,8 +352,8 @@ COMPANY_RESEARCH_PROMPT = """你是一位资深猎头顾问，现在需要对目
 
 **主要竞争对手：**
 <div class="tag-cloud">
-  <span class="tag tag-orange">竞品1</span>
-  <span class="tag tag-orange">竞品2</span>
+  <a href="copy://竞品1" class="tag tag-orange" title="点击复制">竞品1</a>
+  <a href="copy://竞品2" class="tag tag-orange" title="点击复制">竞品2</a>
 </div>
 
 ---

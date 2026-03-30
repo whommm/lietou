@@ -31,16 +31,54 @@ class HtmlRenderer:
 
         # 流式输出缓冲区
         self._buffer = ""
+        self._last_rendered_len = 0
+        self._is_streaming = False
+        self._initialized = False
+        self._user_scrolled = False  # 用户是否手动滚动过
 
         # 创建HTML框架
         self._html_frame = HtmlFrame(
             parent,
-            messages_enabled=False,  # 禁用控制台消息
+            messages_enabled=False,
             vertical_scrollbar=True,
+            on_link_click=self._handle_link_click,
         )
+
+        # 绑定鼠标滚轮事件检测用户滚动
+        self._html_frame.bind('<MouseWheel>', self._on_user_scroll)
 
         # 加载初始空白内容
         self._load_empty()
+
+    def _handle_link_click(self, url: str) -> bool:
+        """处理HTML中的链接点击事件"""
+        if url.startswith("copy://"):
+            import urllib.parse
+            import pyperclip
+            from tkinter import messagebox
+            try:
+                # 解析URL编码的文本
+                text = urllib.parse.unquote(url[7:])
+                pyperclip.copy(text)
+                # 可选：如果你想给用户更明显的反馈，可以取消下面这行的注释
+                # messagebox.showinfo("成功", f"已复制: {text}")
+            except Exception:
+                pass
+            return False  # 返回False阻止默认跳转
+        return True  # 其他链接允许默认处理
+
+    def _on_user_scroll(self, event=None):
+        """用户滚动时的回调"""
+        # 检测是否滚回底部
+        try:
+            pos = self._html_frame.yview()
+            if pos and len(pos) == 2 and pos[1] >= 0.98:
+                # 用户滚回底部，恢复自动跟随
+                self._user_scrolled = False
+            else:
+                self._user_scrolled = True
+        except Exception:
+            self._user_scrolled = True
 
     def _get_css(self) -> str:
         """获取当前主题的CSS"""
@@ -55,6 +93,17 @@ class HtmlRenderer:
     <meta charset="UTF-8">
     <style>
         {css}
+        /* overflow-anchor 自动保持滚动位置 */
+        html {{
+            overflow-anchor: none;
+        }}
+        body {{
+            overflow-anchor: none;
+        }}
+        #content-anchor {{
+            overflow-anchor: auto;
+            width: 100%;
+        }}
         /* 滚动条样式 */
         ::-webkit-scrollbar {{
             width: 8px;
@@ -74,6 +123,7 @@ class HtmlRenderer:
     </style>
 </head>
 <body>
+<div id="content-anchor"></div>
 {body_content}
 </body>
 </html>"""
@@ -133,6 +183,10 @@ class HtmlRenderer:
     def start_stream(self):
         """开始流式输出"""
         self._buffer = ""
+        self._last_rendered_len = 0
+        self._is_streaming = True
+        self._initialized = False
+        self._user_scrolled = False
         self._md.reset()
         # 显示加载状态
         loading_html = self._wrap_html(
@@ -150,14 +204,17 @@ class HtmlRenderer:
         Args:
             chunk: 新的文本片段
         """
+        if not self._is_streaming:
+            self.start_stream()
+
         self._buffer += chunk
 
-        # 更频繁地更新显示
-        if len(self._buffer) % 200 == 0 or len(chunk) > 30:
+        # 增加更新间隔到1500字符，减少重新加载频率
+        if len(self._buffer) - self._last_rendered_len > 1500:
             self._update_stream_display()
 
     def _update_stream_display(self):
-        """更新流式显示内容"""
+        """更新流式显示内容 - 使用DOM innerHTML"""
         if not self._buffer:
             return
 
@@ -165,16 +222,35 @@ class HtmlRenderer:
         try:
             self._md.reset()
             html_body = self._md.convert(self._buffer)
+        except Exception:
+            escaped = self._buffer.replace('<', '&lt;').replace('>', '&gt;').replace('\n', '<br>')
+            html_body = escaped
+
+        self._last_rendered_len = len(self._buffer)
+
+        if not self._initialized:
+            # 首次加载完整页面，包含内容容器
+            full_html = self._wrap_html('<div id="stream-content"></div>')
+            self._html_frame.load_html(full_html)
+            self._initialized = True
+
+        # 使用DOM API更新内容容器
+        try:
+            content_elem = self._html_frame.document.getElementById('stream-content')
+            if content_elem:
+                content_elem.innerHTML = html_body
+        except Exception:
+            # DOM更新失败，回退到重新加载
             full_html = self._wrap_html(html_body)
             self._html_frame.load_html(full_html)
-        except Exception:
-            # 转换失败时显示纯文本
-            escaped = self._buffer.replace('<', '&lt;').replace('>', '&gt;').replace('\n', '<br>')
-            plain_html = self._wrap_html(escaped)
-            self._html_frame.load_html(plain_html)
+
+        # 智能滚动：用户没手动滚动过则跟随底部
+        if not self._user_scrolled:
+            self.parent.after(50, lambda: self._html_frame.yview_moveto(1.0))
 
     def finish_stream(self):
         """完成流式输出，进行最终渲染"""
+        self._is_streaming = False
         self._update_stream_display()
         self._md.reset()
 
