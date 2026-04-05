@@ -6,10 +6,49 @@
 
 import sys
 import os
+import logging
+
+# 配置日志
+LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+os.makedirs(LOG_DIR, exist_ok=True)
+
+logging.basicConfig(
+    level=logging.WARNING,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.FileHandler(os.path.join(LOG_DIR, "error.log"), encoding="utf-8"),
+        logging.StreamHandler(),
+    ],
+)
+
+
+def _global_exception_handler(exc_type, exc_value, exc_traceback):
+    """全局异常处理，防止未捕获异常导致闪退"""
+    if issubclass(exc_type, KeyboardInterrupt):
+        sys.__excepthook__(exc_type, exc_value, exc_traceback)
+        return
+
+    logging.error("未捕获异常", exc_info=(exc_type, exc_value, exc_traceback))
+
+    try:
+        import tkinter as tk
+        from tkinter import messagebox
+
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showerror(
+            "程序异常",
+            f"发生未知错误：\n{exc_value}\n\n错误日志已保存到 logs/error.log",
+        )
+        root.destroy()
+    except Exception:
+        pass
+
+
+sys.excepthook = _global_exception_handler
 
 # 确保能正确导入 src 模块
-if getattr(sys, 'frozen', False):
-    # 打包后的路径
+if getattr(sys, "frozen", False):
     BASE_DIR = os.path.dirname(sys.executable)
 else:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))

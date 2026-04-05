@@ -1,20 +1,32 @@
-"""HTML渲染器模块 - 将Markdown转换为精美HTML显示"""
+"""HTML渲染器模块 - 将Markdown转换为精美HTML显示（鲁棒版）"""
 
 import markdown
 import tkinter as tk
 from tkinterweb import HtmlFrame
 from typing import Optional
 from .themes import LIGHT_CSS, DARK_CSS
+from ..utils.html_sanitizer import HtmlSanitizer
 
 
 class HtmlRenderer:
-    """HTML渲染器 - 支持Markdown转换和流式输出"""
+    """HTML渲染器 - 支持Markdown转换和流式输出
+
+    核心改进：
+    - 节流渲染：300ms最小间隔，防止事件队列洪水
+    - 异常兜底：渲染失败自动降级为纯文本框，不再闪退
+    - HTML补全：自动修复未闭合标签
+    - 缓冲区限制：100KB上限，防止内存泄漏
+    """
+
+    RENDER_INTERVAL_MS = 300
+    MAX_BUFFER_SIZE = 100_000
+    BUFFER_TRIM_SIZE = 50_000
+    MAX_RENDER_RETRIES = 3
 
     def __init__(self, parent: tk.Widget, theme: str = "light"):
         self.parent = parent
         self.theme = theme
 
-        # Markdown转换器
         self._md = markdown.Markdown(extensions=[
             'tables',
             'fenced_code',
@@ -22,11 +34,15 @@ class HtmlRenderer:
             'sane_lists',
         ])
 
-        # 流式输出缓冲区
+        self._sanitizer = HtmlSanitizer()
+
+        # 状态变量
         self._buffer = ""
         self._last_rendered_len = 0
         self._is_streaming = False
-        self._initialized = False
+        self._pending_update = False
+        self._render_retry_count = 0
+        self._fallback_mode = False
 
         # 创建HTML框架
         self._html_frame = HtmlFrame(
@@ -36,7 +52,9 @@ class HtmlRenderer:
             on_link_click=self._handle_link_click,
         )
 
-        # 加载初始内容
+        # 备用文本框（降级模式使用）
+        self._fallback_text: Optional[tk.Widget] = None
+
         self._load_empty()
 
     def _handle_link_click(self, url: str) -> bool:
@@ -46,6 +64,7 @@ class HtmlRenderer:
             import pyperclip
             try:
                 text = urllib.parse.unquote(url[7:])
+                text = urllib.parse.unquote(text)
                 pyperclip.copy(text)
             except Exception:
                 pass
@@ -87,6 +106,10 @@ class HtmlRenderer:
         empty_html = self._wrap_html("<p style='color: #999;'>等待分析结果...</p>")
         self._html_frame.load_html(empty_html)
 
+    # ------------------------------------------------------------------ #
+    # 公共接口
+    # ------------------------------------------------------------------ #
+
     def grid(self, **kwargs):
         """网格布局"""
         self._html_frame.grid(**kwargs)
@@ -121,20 +144,29 @@ class HtmlRenderer:
             self._load_empty()
             return
 
-        self._md.reset()
-        html_body = self._md.convert(markdown_text)
-        full_html = self._wrap_html(html_body)
-        self._html_frame.load_html(full_html)
+        self._exit_fallback_mode()
+
+        try:
+            self._md.reset()
+            html_body = self._md.convert(markdown_text)
+            html_body = self._sanitizer.sanitize(html_body)
+            full_html = self._wrap_html(html_body)
+            self._html_frame.load_html(full_html)
+            self._buffer = markdown_text
+        except Exception:
+            self._buffer = markdown_text
+            self._enter_fallback_mode("渲染异常，显示原始内容")
 
     def start_stream(self):
         """开始流式输出"""
+        self._exit_fallback_mode()
         self._buffer = ""
         self._last_rendered_len = 0
         self._is_streaming = True
-        self._initialized = False
+        self._pending_update = False
+        self._render_retry_count = 0
         self._md.reset()
 
-        # 显示加载状态
         loading_html = self._wrap_html(
             '<div style="text-align: center; padding: 20px; color: #667eea;">'
             '<span style="font-size: 24px;">&#x1F916;</span><br>'
@@ -144,55 +176,23 @@ class HtmlRenderer:
         self._html_frame.load_html(loading_html)
 
     def append_chunk(self, chunk: str):
-        """追加流式文本块"""
+        """追加流式文本块（公共接口）"""
         if not self._is_streaming:
             self.start_stream()
 
+        if len(self._buffer) + len(chunk) > self.MAX_BUFFER_SIZE:
+            self._buffer = self._buffer[-self.BUFFER_TRIM_SIZE:]
+
         self._buffer += chunk
-        self._update_stream_display()
-
-    def _update_stream_display(self):
-        """更新流式显示内容"""
-        if not self._buffer:
-            return
-
-        # 转换当前缓冲区内容
-        try:
-            self._md.reset()
-            html_body = self._md.convert(self._buffer)
-        except Exception:
-            escaped = self._buffer.replace('<', '&lt;').replace('>', '&gt;').replace('\n', '<br>')
-            html_body = escaped
-
-        self._last_rendered_len = len(self._buffer)
-
-        if not self._initialized:
-            full_html = self._wrap_html('<div id="stream-content"></div>')
-            self._html_frame.load_html(full_html)
-            self._initialized = True
-
-        # 使用DOM API更新内容
-        try:
-            content_elem = self._html_frame.document.getElementById('stream-content')
-            if content_elem:
-                content_elem.innerHTML = html_body
-        except Exception:
-            full_html = self._wrap_html(html_body)
-            self._html_frame.load_html(full_html)
-
-        # 自动滚动到底部
-        try:
-            self._html_frame.yview_moveto(1.0)
-        except Exception:
-            pass
+        self._schedule_update()
 
     def finish_stream(self):
         """完成流式输出"""
         self._is_streaming = False
-        self._update_stream_display()
+        if self._buffer and not self._fallback_mode:
+            self._schedule_update()
         self._md.reset()
 
-        # 最终滚动到底部
         try:
             self._html_frame.yview_moveto(1.0)
         except Exception:
@@ -203,6 +203,9 @@ class HtmlRenderer:
         self._buffer = ""
         self._md.reset()
         self._is_streaming = False
+        self._pending_update = False
+        self._render_retry_count = 0
+        self._exit_fallback_mode()
         self._load_empty()
 
     def get_content(self) -> str:
@@ -216,9 +219,11 @@ class HtmlRenderer:
 
         self.theme = theme
 
-        # 重新渲染当前内容
+        if self._fallback_mode and self._fallback_text is not None:
+            return
+
         if self._buffer:
-            self._update_stream_display()
+            self._schedule_update()
         else:
             self._load_empty()
 
@@ -230,6 +235,99 @@ class HtmlRenderer:
             return True
         except Exception:
             return False
+
+    # ------------------------------------------------------------------ #
+    # 内部渲染逻辑
+    # ------------------------------------------------------------------ #
+
+    def _schedule_update(self):
+        """节流调度：确保同一时间只有一个渲染任务在队列中"""
+        if self._pending_update or self._fallback_mode:
+            return
+        self._pending_update = True
+        self._html_frame.after(self.RENDER_INTERVAL_MS, self._do_render)
+
+    def _do_render(self):
+        """实际渲染执行（带完整异常处理）"""
+        try:
+            self._render_retry_count = 0
+            self._render_once()
+        except Exception as e:
+            self._handle_render_error(e)
+        finally:
+            self._pending_update = False
+
+    def _render_once(self):
+        """单次渲染逻辑"""
+        if not self._buffer:
+            return
+
+        html_body = self._convert_markdown_safe(self._buffer)
+        html_body = self._sanitizer.sanitize(html_body)
+        full_html = self._wrap_html(html_body)
+
+        self._html_frame.load_html(full_html)
+        self._last_rendered_len = len(self._buffer)
+
+        try:
+            self._html_frame.yview_moveto(1.0)
+        except Exception:
+            pass
+
+    def _convert_markdown_safe(self, text: str) -> str:
+        """安全的Markdown转换"""
+        try:
+            self._md.reset()
+            return self._md.convert(text)
+        except Exception:
+            return (text
+                    .replace('&', '&amp;')
+                    .replace('<', '&lt;')
+                    .replace('>', '&gt;')
+                    .replace('\n', '<br>'))
+
+    def _handle_render_error(self, error: Exception):
+        """渲染错误处理"""
+        self._render_retry_count += 1
+
+        if self._render_retry_count < self.MAX_RENDER_RETRIES:
+            self._html_frame.after(500, self._do_render)
+            return
+
+        self._enter_fallback_mode(str(error))
+
+    def _enter_fallback_mode(self, error_msg: str):
+        """进入降级模式：显示纯文本"""
+        self._fallback_mode = True
+
+        try:
+            self._html_frame.grid_forget()
+        except Exception:
+            pass
+
+        if self._fallback_text is None:
+            import customtkinter as ctk
+            self._fallback_text = ctk.CTkTextbox(
+                self.parent,
+                wrap="word",
+                state="normal",
+            )
+
+        self._fallback_text.grid_forget()
+        self._fallback_text.delete("1.0", "end")
+        self._fallback_text.insert("1.0",
+            f"[HTML渲染异常，显示原始内容]\n\n{self._buffer}"
+        )
+        self._fallback_text.grid(row=1, column=0, padx=10, pady=(5, 10), sticky="nsew")
+
+    def _exit_fallback_mode(self):
+        """退出降级模式"""
+        self._fallback_mode = False
+        if self._fallback_text is not None:
+            try:
+                self._fallback_text.grid_forget()
+            except Exception:
+                pass
 
 
 class HtmlResultWidget(HtmlRenderer):

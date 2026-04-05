@@ -1,5 +1,6 @@
 """LLM API 客户端模块"""
 
+import time
 from openai import OpenAI, APIError, AuthenticationError, APITimeoutError, APIConnectionError
 from typing import Generator, Optional
 from .prompt import SYSTEM_PROMPT
@@ -28,6 +29,9 @@ class TimeoutError(LLMClientError):
 class LLMClient:
     """大语言模型客户端"""
 
+    MAX_RETRIES = 2
+    RETRY_DELAY_BASE = 1.0
+
     def __init__(self, api_base_url: str, api_key: str, model_name: str = "deepseek-chat", timeout: int = 120):
         self.api_base_url = api_base_url.rstrip('/')
         self.api_key = api_key
@@ -44,6 +48,52 @@ class LLMClient:
                 timeout=self.timeout
             )
         return self._client
+
+    def _execute_with_retry(self, func, *args, **kwargs):
+        """带重试的执行器"""
+        last_error = None
+        for attempt in range(self.MAX_RETRIES + 1):
+            try:
+                return func(*args, **kwargs)
+            except AuthError:
+                raise
+            except (NetworkError, TimeoutError) as e:
+                last_error = e
+                if attempt < self.MAX_RETRIES:
+                    delay = self.RETRY_DELAY_BASE * (2 ** attempt)
+                    time.sleep(delay)
+            except APIError as e:
+                last_error = e
+                if "insufficient_quota" in str(e).lower():
+                    raise AuthError("账户余额不足，请充值后重试。") from e
+                if attempt < self.MAX_RETRIES:
+                    delay = self.RETRY_DELAY_BASE * (2 ** attempt)
+                    time.sleep(delay)
+            except Exception as e:
+                last_error = e
+                if attempt < self.MAX_RETRIES:
+                    delay = self.RETRY_DELAY_BASE * (2 ** attempt)
+                    time.sleep(delay)
+        raise last_error or LLMClientError("请求失败")
+
+    def _do_analyze_jd(self, jd_text: str, company_context: str = "") -> str:
+        """实际执行分析请求（非流式）"""
+        client = self._get_client()
+
+        user_message = jd_text
+        if company_context:
+            user_message = f"\u3010\u516c\u53f8\u80cc\u666f\u4fe1\u606f\u3011\n{company_context}\n\n\u3010\u5c97\u4f4d\u63cf\u8ff0\u3011\n{jd_text}"
+
+        response = client.chat.completions.create(
+            model=self.model_name,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_message}
+            ],
+            temperature=0.7,
+            max_tokens=4096
+        )
+        return response.choices[0].message.content or ""
 
     def analyze_jd(self, jd_text: str, company_context: str = "") -> str:
         """
@@ -62,36 +112,29 @@ class LLMClient:
             TimeoutError: 请求超时
             LLMClientError: 其他错误
         """
-        try:
-            client = self._get_client()
+        return self._execute_with_retry(self._do_analyze_jd, jd_text, company_context)
 
-            # 构建用户消息
-            user_message = jd_text
-            if company_context:
-                user_message = f"【公司背景信息】\n{company_context}\n\n【岗位描述】\n{jd_text}"
+    def _do_analyze_jd_stream(self, jd_text: str, company_context: str = "") -> Generator[str, None, None]:
+        """实际执行分析请求（流式）"""
+        client = self._get_client()
 
-            response = client.chat.completions.create(
-                model=self.model_name,
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": user_message}
-                ],
-                temperature=0.7,
-                max_tokens=4096
-            )
-            return response.choices[0].message.content or ""
-        except AuthenticationError as e:
-            raise AuthError("API 密钥无效或账户余额不足，请检查配置。") from e
-        except APITimeoutError as e:
-            raise TimeoutError(f"请求超时（{self.timeout}秒），请稍后重试或检查网络。") from e
-        except APIConnectionError as e:
-            raise NetworkError("无法连接到大模型服务器，请检查网络或 API 地址是否正确。") from e
-        except APIError as e:
-            if "insufficient_quota" in str(e).lower():
-                raise AuthError("账户余额不足，请充值后重试。") from e
-            raise LLMClientError(f"API 调用失败: {str(e)}") from e
-        except Exception as e:
-            raise LLMClientError(f"未知错误: {str(e)}") from e
+        user_message = jd_text
+        if company_context:
+            user_message = f"\u3010\u516c\u53f8\u80cc\u666f\u4fe1\u606f\u3011\n{company_context}\n\n\u3010\u5c97\u4f4d\u63cf\u8ff0\u3011\n{jd_text}"
+
+        stream = client.chat.completions.create(
+            model=self.model_name,
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_message}
+            ],
+            temperature=0.7,
+            max_tokens=4096,
+            stream=True
+        )
+        for chunk in stream:
+            if chunk.choices and chunk.choices[0].delta.content:
+                yield chunk.choices[0].delta.content
 
     def analyze_jd_stream(self, jd_text: str, company_context: str = "") -> Generator[str, None, None]:
         """
@@ -110,67 +153,27 @@ class LLMClient:
             TimeoutError: 请求超时
             LLMClientError: 其他错误
         """
-        try:
-            client = self._get_client()
+        return self._execute_with_retry(self._do_analyze_jd_stream, jd_text, company_context)
 
-            # 构建用户消息
-            user_message = jd_text
-            if company_context:
-                user_message = f"【公司背景信息】\n{company_context}\n\n【岗位描述】\n{jd_text}"
+    def _do_chat_stream(self, user_message: str, system_message: str = "") -> Generator[str, None, None]:
+        """实际执行聊天请求（流式）"""
+        client = self._get_client()
+        messages = []
+        if system_message:
+            messages.append({"role": "system", "content": system_message})
+        messages.append({"role": "user", "content": user_message})
 
-            stream = client.chat.completions.create(
-                model=self.model_name,
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": user_message}
-                ],
-                temperature=0.7,
-                max_tokens=4096,
-                stream=True
-            )
-            for chunk in stream:
-                if chunk.choices and chunk.choices[0].delta.content:
-                    yield chunk.choices[0].delta.content
-        except AuthenticationError as e:
-            raise AuthError("API 密钥无效或账户余额不足，请检查配置。") from e
-        except APITimeoutError as e:
-            raise TimeoutError(f"请求超时（{self.timeout}秒），请稍后重试或检查网络。") from e
-        except APIConnectionError as e:
-            raise NetworkError("无法连接到大模型服务器，请检查网络或 API 地址是否正确。") from e
-        except APIError as e:
-            if "insufficient_quota" in str(e).lower():
-                raise AuthError("账户余额不足，请充值后重试。") from e
-            raise LLMClientError(f"API 调用失败: {str(e)}") from e
-        except Exception as e:
-            raise LLMClientError(f"未知错误: {str(e)}") from e
+        stream = client.chat.completions.create(
+            model=self.model_name,
+            messages=messages,
+            temperature=0.7,
+            max_tokens=4096,
+            stream=True
+        )
+        for chunk in stream:
+            if chunk.choices and chunk.choices[0].delta.content:
+                yield chunk.choices[0].delta.content
+
     def chat_stream(self, user_message: str, system_message: str = "") -> Generator[str, None, None]:
         """通用聊天接口（流式输出）"""
-        try:
-            client = self._get_client()
-            messages = []
-            if system_message:
-                messages.append({"role": "system", "content": system_message})
-            messages.append({"role": "user", "content": user_message})
-
-            stream = client.chat.completions.create(
-                model=self.model_name,
-                messages=messages,
-                temperature=0.7,
-                max_tokens=4096,
-                stream=True
-            )
-            for chunk in stream:
-                if chunk.choices and chunk.choices[0].delta.content:
-                    yield chunk.choices[0].delta.content
-        except AuthenticationError as e:
-            raise AuthError("API 密钥无效或账户余额不足，请检查配置。") from e
-        except APITimeoutError as e:
-            raise TimeoutError(f"请求超时（{self.timeout}秒），请稍后重试或检查网络。") from e
-        except APIConnectionError as e:
-            raise NetworkError("无法连接到大模型服务器，请检查网络或 API 地址是否正确。") from e
-        except APIError as e:
-            if "insufficient_quota" in str(e).lower():
-                raise AuthError("账户余额不足，请充值后重试。") from e
-            raise LLMClientError(f"API 调用失败: {str(e)}") from e
-        except Exception as e:
-            raise LLMClientError(f"未知错误: {str(e)}") from e
+        return self._execute_with_retry(self._do_chat_stream, user_message, system_message)

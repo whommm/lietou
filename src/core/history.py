@@ -31,7 +31,7 @@ class HistoryManager:
         re.compile(r'职位[：:]\s*(.+?)(?:\n|$)'),
     ]
 
-    def __init__(self, record_type: str = "job_analysis", max_records: int = 100):
+    def __init__(self, record_type: str = "job_analysis", max_records: int = 50):
         self.record_type = record_type
         self.history_path = self._get_history_path(record_type)
         self.max_records = max_records
@@ -82,8 +82,16 @@ class HistoryManager:
 
     def _extract_title(self, jd_text: str, result: str = "") -> str:
         """从结果或JD文本中提取标题（岗位名称）"""
-        # 优先从AI结果中提取【岗位名称】
         if result:
+            # 新格式：纯HTML <h2>岗位名称：xxx</h2>
+            match = re.search(r'<h2>[^<]*岗位名称[：:]\s*([^<]+)</h2>', result)
+            if match:
+                title = match.group(1).strip()
+                if len(title) > 30:
+                    title = title[:30] + "..."
+                return title
+
+            # 旧格式兼容：【岗位名称】xxx
             match = re.search(r'【岗位名称】(.+?)(?:\n|$)', result)
             if match:
                 title = match.group(1).strip()
@@ -91,11 +99,9 @@ class HistoryManager:
                     title = title[:30] + "..."
                 return title
 
-        # 如果结果中没有，从JD文本中提取
         if not jd_text:
             return "未命名岗位"
 
-        # 使用缓存的正则表达式
         for pattern in self.TITLE_PATTERNS:
             match = pattern.search(jd_text)
             if match:

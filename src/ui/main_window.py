@@ -450,44 +450,17 @@ class MainWindow(ctk.CTk):
                 timeout=self.config_manager.config.timeout
             )
 
-            # 根据配置选择流式或非流式输出
             if self.config_manager.config.stream_mode:
-                # 流式输出
-                import time
-                chunk_buffer = []
-                last_flush_time = time.time()
-                flush_interval = 0.15  # 更新间隔
-                buffer_size_threshold = 150
-
                 for chunk in client.analyze_jd_stream(jd_text, company_context):
                     if self._stop_flag:
                         break
-
-                    chunk_buffer.append(chunk)
-                    current_time = time.time()
-
-                    if (current_time - last_flush_time >= flush_interval or
-                        len("".join(chunk_buffer)) >= buffer_size_threshold):
-                        combined_text = "".join(chunk_buffer)
-                        self._raw_result_chunks.append(combined_text)
-                        self.after(0, self._update_html_display, combined_text)
-
-                        chunk_buffer = []
-                        last_flush_time = current_time
-
-                if chunk_buffer:
-                    combined_text = "".join(chunk_buffer)
-                    self._raw_result_chunks.append(combined_text)
-                    self.after(0, self._update_html_display, combined_text)
-
-                self._raw_result = "".join(self._raw_result_chunks)
+                    self.after(0, self._update_html_display, chunk)
             else:
-                # 非流式输出
                 result = client.analyze_jd(jd_text, company_context)
                 if not self._stop_flag:
-                    self._raw_result_chunks = [result]
                     self._raw_result = result
-                    self.after(0, self._update_html_display, result)
+                    self._raw_result_chunks = [result]
+                    self.after(0, self.html_renderer.set_content, result)
 
             if not self._stop_flag:
                 self.after(0, self._on_analysis_complete, None)
@@ -495,14 +468,13 @@ class MainWindow(ctk.CTk):
         except (AuthError, NetworkError, TimeoutError, LLMClientError) as e:
             self.after(0, self._on_analysis_complete, str(e))
         except Exception as e:
-            self.after(0, self._on_analysis_complete, f"未知错误: {str(e)}")
+            import traceback
+            error_detail = f"未知错误: {str(e)}\n{traceback.format_exc()}"
+            self.after(0, self._on_analysis_complete, error_detail)
 
     def _update_html_display(self, text: str):
-        """更新HTML显示"""
-        # 追加到HTML渲染器的缓冲区
-        self.html_renderer._buffer += text
-        # 更新显示
-        self.html_renderer._update_stream_display()
+        """更新HTML显示（使用公共接口）"""
+        self.html_renderer.append_chunk(text)
 
     def _on_analysis_complete(self, error: Optional[str]):
         """分析完成回调"""
@@ -538,8 +510,15 @@ class MainWindow(ctk.CTk):
         self.status_label.configure(text=text)
 
     def on_closing(self):
-        """窗口关闭事件"""
+        """安全关闭"""
         self._stop_flag = True
+
+        if self._analysis_thread and self._analysis_thread.is_alive():
+            self._analysis_thread.join(timeout=3.0)
+
+        if hasattr(self, 'html_renderer'):
+            self.html_renderer.clear()
+
         self.destroy()
 
     def _on_load_history(self, record):
