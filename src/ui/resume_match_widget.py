@@ -152,7 +152,7 @@ class ResumeMatchWidget(ctk.CTkFrame):
 
         self.set_matching(True)
         self._result_buffer = ""
-        self.html_renderer.start_stream()
+        self.html_renderer.show_loading()
         self.on_match(job_desc, resume)
 
     def _on_clear_click(self):
@@ -198,18 +198,10 @@ class ResumeMatchWidget(ctk.CTkFrame):
         if job_list:
             self.job_combo.set(job_list[0])
 
-    def append_result(self, text: str):
-        """追加结果文本"""
-        self._result_buffer += text
-        self.html_renderer.append_chunk(text)
-
-    def finish_stream(self):
-        """完成流式输出"""
-        self.html_renderer.finish_stream()
-
-    def enable_match_button(self):
-        """启用匹配按钮"""
-        self.set_matching(False)
+    def set_result(self, text: str):
+        """设置完整结果并渲染"""
+        self._result_buffer = text
+        self.html_renderer.set_content(text)
 
     def set_theme(self, theme: str):
         """设置主题"""

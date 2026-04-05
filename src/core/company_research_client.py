@@ -39,34 +39,18 @@ class CompanyResearchClient:
         self.tavily = TavilyClient(api_key=tavily_api_key)
         self.llm = llm_client
 
-    def research(self, company_name: str) -> Generator[str, None, None]:
-        """深度调研公司信息（流式输出）"""
-        # 步骤1: 搜索公司信息
-        yield "🔍 正在搜索公司相关信息...\n"
+    def research(self, company_name: str) -> str:
+        """深度调研公司信息（非流式，返回完整结果）"""
         search_results = self._search_company(company_name)
 
         if not search_results:
-            yield "⚠️ 未找到相关搜索结果，请检查公司名称是否正确\n"
-            return
+            return "未找到相关搜索结果，请检查公司名称是否正确"
 
-        yield "✅ 已找到 {} 条相关信息\n\n".format(len(search_results))
-
-        # 步骤2: 提取网页详细内容
-        yield "📄 正在提取网页详细内容...\n"
         detailed_contents = self._extract_contents(search_results)
 
-        yield "✅ 已成功提取 {} 个网页内容\n\n".format(len(detailed_contents))
+        report = self._generate_report(company_name, search_results, detailed_contents)
 
-        # 步骤3: LLM整合分析
-        yield "🤖 正在生成调研报告...\n\n"
-        yield "---\n\n"
-
-        report_generator = self._generate_report(
-            company_name, search_results, detailed_contents
-        )
-
-        for chunk in report_generator:
-            yield chunk
+        return report
 
     def _search_company(self, company_name: str) -> List[Dict]:
         """搜索公司信息"""
@@ -104,51 +88,56 @@ class CompanyResearchClient:
         except Exception as e:
             raise CompanyResearchError("搜索失败: {}".format(str(e)))
 
+    def _extract_single_url(self, url: str) -> dict:
+        """提取单个URL的内容"""
+        try:
+            downloaded = trafilatura.fetch_url(url)
+            if not downloaded:
+                logger.warning("下载失败: {}".format(url))
+                return None
+
+            content = trafilatura.extract(
+                downloaded,
+                output_format="txt",
+                include_tables=True,
+                include_comments=False,
+                favor_recall=True,
+            )
+
+            if content and len(content) > 50:
+                logger.info("成功提取URL内容: {}".format(url))
+                return {"url": url, "content": content[:4000]}
+            else:
+                logger.warning("内容为空或太短，跳过: {}".format(url))
+                return None
+
+        except Exception as e:
+            logger.error("提取URL失败 {}: {}".format(url, str(e)))
+            return None
+
     def _extract_contents(self, search_results: List[Dict]) -> List[Dict]:
-        """提取网页详细内容"""
+        """并行提取网页详细内容"""
         try:
             import trafilatura
         except ImportError:
             logger.warning("缺少 trafilatura 包，跳过网页内容提取")
             return []
 
-        contents = []
         urls_to_extract = [r["url"] for r in search_results[:5] if r.get("url")]
-        logger.info("准备提取 {} 个URL的内容".format(len(urls_to_extract)))
+        logger.info("准备并行提取 {} 个URL的内容".format(len(urls_to_extract)))
 
-        for idx, url in enumerate(urls_to_extract):
-            logger.info(
-                "正在提取第 {}/{} 个URL: {}".format(idx + 1, len(urls_to_extract), url)
-            )
-            try:
-                downloaded = trafilatura.fetch_url(url)
-                if not downloaded:
-                    logger.warning("下载失败: {}".format(url))
-                    continue
+        from concurrent.futures import ThreadPoolExecutor, as_completed
 
-                logger.debug("下载成功，内容长度: {} 字节".format(len(downloaded)))
-
-                content = trafilatura.extract(
-                    downloaded,
-                    output_format="txt",
-                    include_tables=True,
-                    include_comments=False,
-                    favor_recall=True,
-                )
-
-                if content:
-                    logger.info("提取到内容长度: {} 字符".format(len(content)))
-                    if len(content) > 50:
-                        contents.append({"url": url, "content": content[:4000]})
-                        logger.info("成功添加URL内容: {}".format(url))
-                    else:
-                        logger.warning("内容太短，跳过: {}".format(url))
-                else:
-                    logger.warning("提取内容为空: {}".format(url))
-
-            except Exception as e:
-                logger.error("提取URL失败 {}: {}".format(url, str(e)))
-                continue
+        contents = []
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            futures = {
+                executor.submit(self._extract_single_url, url): url
+                for url in urls_to_extract
+            }
+            for future in as_completed(futures):
+                result = future.result()
+                if result:
+                    contents.append(result)
 
         logger.info("最终成功提取 {} 个网页内容".format(len(contents)))
         return contents
@@ -158,9 +147,8 @@ class CompanyResearchClient:
         company_name: str,
         search_results: List[Dict],
         detailed_contents: List[Dict],
-    ) -> Generator[str, None, None]:
+    ) -> str:
         """生成调研报告"""
-        # 构建搜索摘要
         sources_text = "\n".join(
             [
                 "- [{}]({}): {}".format(
@@ -172,7 +160,6 @@ class CompanyResearchClient:
             ]
         )
 
-        # 构建详细内容
         detailed_text = "\n\n".join(
             [
                 "### 来源: {}\n{}".format(c["url"], c["content"])
@@ -183,12 +170,10 @@ class CompanyResearchClient:
         if not detailed_text:
             detailed_text = "未获取到详细网页内容"
 
-        # 构建提示词
         prompt = COMPANY_RESEARCH_PROMPT.format(
             company_name=company_name,
             sources=sources_text,
             detailed_content=detailed_text,
         )
 
-        # 调用LLM生成报告（流式）
-        return self.llm.chat_stream(prompt)
+        return self.llm.chat(prompt)

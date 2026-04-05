@@ -3,7 +3,7 @@
 import customtkinter as ctk
 from tkinter import messagebox
 import threading
-from typing import Optional, List
+from typing import Optional
 
 from ..core.config import ConfigManager
 from ..core.history import HistoryManager
@@ -50,11 +50,10 @@ class MainWindow(ctk.CTk):
         self._analysis_thread: Optional[threading.Thread] = None
         self._resume_match_thread: Optional[threading.Thread] = None
         self._company_research_thread: Optional[threading.Thread] = None
-        self._stop_flag = False
+        self._stop_event = threading.Event()
 
-        # 原始结果文本 - 使用list收集chunk，最后合并
-        self._raw_result_chunks: List[str] = []
-        self._raw_result = ""  # 最终结果字符串
+        # 原始结果文本
+        self._raw_result = ""
 
         # 当前分析的JD文本（用于保存历史记录）
         self._current_jd = ""
@@ -126,13 +125,6 @@ class MainWindow(ctk.CTk):
         self.theme_switch.grid(row=0, column=7, padx=(10, 5), pady=10)
         if self.config_manager.config.theme == "dark":
             self.theme_switch.select()
-
-        self.stream_switch = ctk.CTkSwitch(
-            config_frame, text="流式输出", command=self._on_stream_toggle
-        )
-        self.stream_switch.grid(row=0, column=8, padx=(5, 5), pady=10)
-        if self.config_manager.config.stream_mode:
-            self.stream_switch.select()
 
         # 第二行：Tavily API Key
         ctk.CTkLabel(config_frame, text="Tavily Key:").grid(
@@ -405,12 +397,6 @@ class MainWindow(ctk.CTk):
         self.company_research_widget.set_theme(theme)
         self.resume_match_widget.set_theme(theme)
 
-    def _on_stream_toggle(self):
-        """流式输出开关事件"""
-        stream_mode = bool(self.stream_switch.get())
-        self.config_manager.update(stream_mode=stream_mode)
-        self.config_manager.save_config()
-
     def _on_clear_input(self):
         """清空输入"""
         self.jd_textbox.delete("1.0", "end")
@@ -422,7 +408,6 @@ class MainWindow(ctk.CTk):
 
         # 重置状态
         self._raw_result = ""
-        self._raw_result_chunks = []
         self._analysis_done = False
 
         # 如果正在显示历史，切回结果视图
@@ -485,12 +470,10 @@ class MainWindow(ctk.CTk):
 
         # 锁定 UI
         self._set_ui_analyzing(True)
-        self._stop_flag = False
+        self._stop_event.clear()
 
-        # 开始流式输出
-        self.html_renderer.start_stream()
+        self.html_renderer.show_loading()
 
-        # 启动后台线程
         self._analysis_thread = threading.Thread(
             target=self._do_analysis,
             args=(url, key, model, jd_text, company_context),
@@ -510,24 +493,9 @@ class MainWindow(ctk.CTk):
                 timeout=self.config_manager.config.timeout,
             )
 
-            if self.config_manager.config.stream_mode:
-                chunks = []
-                for chunk in client.analyze_jd_stream(jd_text, company_context):
-                    if self._stop_flag:
-                        break
-                    chunks.append(chunk)
-                    self.after(0, self._update_html_display, chunk)
-                if not self._stop_flag:
-                    self._raw_result = "".join(chunks)
-                    self._raw_result_chunks = chunks
-            else:
-                result = client.analyze_jd(jd_text, company_context)
-                if not self._stop_flag:
-                    self._raw_result = result
-                    self._raw_result_chunks = [result]
-                    self.after(0, self.html_renderer.set_content, result)
-
-            if not self._stop_flag:
+            result = client.analyze_jd(jd_text, company_context)
+            if not self._stop_event.is_set():
+                self._raw_result = result
                 self.after(0, self._on_analysis_complete, None)
 
         except (AuthError, NetworkError, TimeoutError, LLMClientError) as e:
@@ -538,26 +506,19 @@ class MainWindow(ctk.CTk):
             error_detail = f"未知错误: {str(e)}\n{traceback.format_exc()}"
             self.after(0, self._on_analysis_complete, error_detail)
 
-    def _update_html_display(self, text: str):
-        """更新HTML显示（使用公共接口）"""
-        self.html_renderer.append_chunk(text)
-
     def _on_analysis_complete(self, error: Optional[str]):
         """分析完成回调"""
         self._set_ui_analyzing(False)
 
-        # 完成流式输出，进行最终渲染
-        self.html_renderer.finish_stream()
-
         if error:
+            self.html_renderer.clear()
             messagebox.showerror("分析失败", error)
             self._set_status("分析失败")
         else:
             self._analysis_done = True
-            # 保存历史记录
+            self.html_renderer.set_content(self._raw_result)
             if self._current_jd and self._raw_result:
                 self.job_history_manager.save_record(self._current_jd, self._raw_result)
-                # 更新简历匹配的岗位列表
                 self._update_resume_job_list()
             self._set_status("分析完成 - 已自动保存到历史记录")
 
@@ -577,7 +538,7 @@ class MainWindow(ctk.CTk):
 
     def on_closing(self):
         """安全关闭"""
-        self._stop_flag = True
+        self._stop_event.set()
 
         if self._analysis_thread and self._analysis_thread.is_alive():
             self._analysis_thread.join(timeout=3.0)
@@ -601,7 +562,6 @@ class MainWindow(ctk.CTk):
 
         # 加载历史结果
         self._raw_result = record.result
-        self._raw_result_chunks = [record.result]
         self._current_jd = record.jd_text
         self._analysis_done = True
 
@@ -646,20 +606,28 @@ class MainWindow(ctk.CTk):
                 api_base_url=url, api_key=key, model_name=model, timeout=60
             )
 
-            # 构建提示词
             prompt = RESUME_MATCH_PROMPT.format(job_description=job_desc, resume=resume)
+            result_text = client.chat(prompt)
 
-            # 流式输出
-            result_chunks = []
-            for chunk in client.chat_stream(prompt):
-                result_chunks.append(chunk)
-                self.after(0, self.resume_match_widget.append_result, chunk)
+            self.after(
+                0, self._on_resume_match_complete, result_text, job_desc, resume, None
+            )
 
-            self.after(0, self.resume_match_widget.finish_stream)
+        except Exception as e:
+            self.after(0, self._on_resume_match_complete, "", job_desc, resume, str(e))
 
-            self.after(0, self.resume_match_widget.enable_match_button)
+    def _on_resume_match_complete(
+        self, result_text: str, job_desc: str, resume: str, error: Optional[str]
+    ):
+        """简历匹配完成回调"""
+        self.resume_match_widget.set_matching(False)
 
-            result_text = "".join(result_chunks)
+        if error:
+            self.resume_match_widget.html_renderer.clear()
+            messagebox.showerror("匹配失败", error)
+            self._set_status("简历匹配失败")
+        else:
+            self.resume_match_widget.set_result(result_text)
             if result_text:
                 self.resume_history_manager.save_record(
                     jd_text="[简历匹配]\n岗位: {}...\n简历: {}...".format(
@@ -667,10 +635,7 @@ class MainWindow(ctk.CTk):
                     ),
                     result=result_text,
                 )
-        except Exception as e:
-            self.after(0, self.resume_match_widget.append_result, f"\n\n错误: {str(e)}")
-            self.after(0, self.resume_match_widget.finish_stream)
-            self.after(0, self.resume_match_widget.enable_match_button)
+            self._set_status("简历匹配完成")
 
     def _update_company_list(self):
         """更新岗位分析的公司调研列表"""
@@ -736,30 +701,26 @@ class MainWindow(ctk.CTk):
                 tavily_api_key=tavily_key, llm_client=llm_client
             )
 
-            for chunk in research_client.research(company_name):
-                self.after(0, self.company_research_widget.append_result, chunk)
-
-            # 完成后更新HTML显示
-            self.after(0, self.company_research_widget.finish_stream)
-
-            self.after(0, self._on_company_research_complete, company_name, None)
+            result = research_client.research(company_name)
+            self.after(
+                0, self._on_company_research_complete, company_name, None, result
+            )
 
         except Exception as e:
-            self.after(
-                0, self.company_research_widget.append_result, f"\n\n错误: {str(e)}"
-            )
-            self.after(0, self.company_research_widget.finish_stream)
-            self.after(0, self._on_company_research_complete, company_name, str(e))
+            self.after(0, self._on_company_research_complete, company_name, str(e), "")
 
-    def _on_company_research_complete(self, company_name: str, error: Optional[str]):
+    def _on_company_research_complete(
+        self, company_name: str, error: Optional[str], result: str = ""
+    ):
         """公司调研完成回调"""
         self.company_research_widget.set_researching(False)
 
         if error:
+            self.html_renderer.clear()
             messagebox.showerror("调研失败", error)
             self._set_status("公司调研失败")
         else:
-            result = self.company_research_widget.get_result()
+            self.company_research_widget.set_result(result)
             if result:
                 self.company_history_manager.save_record(
                     jd_text="[公司调研] {}".format(company_name), result=result

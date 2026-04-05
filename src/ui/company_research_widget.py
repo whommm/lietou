@@ -144,7 +144,7 @@ class CompanyResearchWidget(ctk.CTkFrame):
 
         self.set_researching(True)
         self._result_buffer = ""
-        self.html_renderer.start_stream()
+        self.html_renderer.show_loading()
         self.on_research(company_name)
 
     def _on_clear_click(self):
@@ -173,14 +173,10 @@ class CompanyResearchWidget(ctk.CTkFrame):
             self.research_btn.configure(state="normal", text="开始调研")
             self.company_entry.configure(state="normal")
 
-    def append_result(self, text: str):
-        """追加结果文本"""
-        self._result_buffer += text
-        self.html_renderer.append_chunk(text)
-
-    def finish_stream(self):
-        """完成流式输出"""
-        self.html_renderer.finish_stream()
+    def set_result(self, text: str):
+        """设置完整结果并渲染"""
+        self._result_buffer = text
+        self.html_renderer.set_content(text)
 
     def get_result(self) -> str:
         """获取完整结果"""

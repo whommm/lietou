@@ -50,6 +50,16 @@ nul
 
 # 历史记录文件（用户数据）
 history.json
+history_job_analysis.json
+history_resume_match.json
+history_company_research.json
 
-# Claude配置
-.claude/
+# 日志
+logs/
+
+# Python 内置文件
+LICENSE.txt
+NEWS.txt
+
+# opencode 配置
+.opencode/

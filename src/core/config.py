@@ -14,10 +14,9 @@ class AppConfig:
     api_base_url: str = ""
     api_key: str = ""
     model_name: str = "deepseek-chat"
-    tavily_api_key: str = ""  # Tavily API Key
+    tavily_api_key: str = ""
     timeout: int = 120
     theme: str = "dark"
-    stream_mode: bool = False  # 流式输出开关，默认关闭
 
 
 class ConfigManager:
@@ -48,7 +47,9 @@ class ConfigManager:
             try:
                 with open(self.config_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                return AppConfig(**data)
+                valid_fields = {f.name for f in AppConfig.__dataclass_fields__.values()}
+                filtered = {k: v for k, v in data.items() if k in valid_fields}
+                return AppConfig(**filtered)
             except (json.JSONDecodeError, TypeError, KeyError):
                 return AppConfig()
         return AppConfig()

@@ -7,6 +7,175 @@ from typing import Optional
 from .themes import LIGHT_CSS, DARK_CSS
 from ..utils.html_sanitizer import HtmlSanitizer
 
+LOADING_ANIMATION_HTML = """
+<div class="loading-container">
+    <div class="pulse-ring"></div>
+    <div class="pulse-ring pulse-ring-delay"></div>
+    <div class="brain-icon">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z" fill="currentColor"/>
+        </svg>
+    </div>
+    <div class="loading-text">
+        <span class="thinking-dot">AI</span>
+        <span class="thinking-dot" style="animation-delay:0.1s">正在</span>
+        <span class="thinking-dot" style="animation-delay:0.2s">深度</span>
+        <span class="thinking-dot" style="animation-delay:0.3s">分析</span>
+    </div>
+    <div class="loading-steps">
+        <div class="step-item" id="step-1">
+            <div class="step-dot"></div>
+            <span class="step-label">解析岗位信息</span>
+        </div>
+        <div class="step-item" id="step-2">
+            <div class="step-dot"></div>
+            <span class="step-label">行业背景匹配</span>
+        </div>
+        <div class="step-item" id="step-3">
+            <div class="step-dot"></div>
+            <span class="step-label">提取核心门槛</span>
+        </div>
+        <div class="step-item" id="step-4">
+            <div class="step-dot"></div>
+            <span class="step-label">生成搜索策略</span>
+        </div>
+    </div>
+    <div class="loading-shimmer-bar">
+        <div class="shimmer-fill"></div>
+    </div>
+</div>
+<style>
+    .loading-container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        min-height: 400px;
+        padding: 40px 20px;
+        position: relative;
+    }
+    .pulse-ring {
+        position: absolute;
+        width: 120px;
+        height: 120px;
+        border-radius: 50%;
+        border: 3px solid var(--pulse-color, #667eea);
+        animation: pulse-expand 2s ease-out infinite;
+        opacity: 0;
+        pointer-events: none;
+    }
+    .pulse-ring-delay {
+        animation-delay: 1s;
+    }
+    @keyframes pulse-expand {
+        0% { transform: scale(0.5); opacity: 0.6; }
+        100% { transform: scale(2); opacity: 0; }
+    }
+    .brain-icon {
+        width: 80px;
+        height: 80px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        animation: float-bounce 2s ease-in-out infinite;
+        box-shadow: 0 8px 32px rgba(102, 126, 234, 0.3);
+        position: relative;
+        z-index: 1;
+    }
+    @keyframes float-bounce {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-10px); }
+    }
+    .brain-icon svg {
+        animation: rotate-slow 8s linear infinite;
+    }
+    @keyframes rotate-slow {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+    }
+    .loading-text {
+        margin-top: 28px;
+        font-size: 20px;
+        font-weight: 600;
+        letter-spacing: 2px;
+    }
+    .thinking-dot {
+        display: inline-block;
+        animation: fade-slide 1.8s ease-in-out infinite;
+        opacity: 0.4;
+    }
+    @keyframes fade-slide {
+        0%, 100% { opacity: 0.4; transform: translateY(0); }
+        50% { opacity: 1; transform: translateY(-2px); }
+    }
+    .loading-steps {
+        margin-top: 36px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        width: 100%;
+        max-width: 260px;
+    }
+    .step-item {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        animation: step-fade-in 0.5s ease forwards;
+        opacity: 0;
+    }
+    .step-item:nth-child(1) { animation-delay: 2s; }
+    .step-item:nth-child(2) { animation-delay: 8s; }
+    .step-item:nth-child(3) { animation-delay: 16s; }
+    .step-item:nth-child(4) { animation-delay: 24s; }
+    @keyframes step-fade-in {
+        to { opacity: 1; }
+    }
+    .step-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #667eea;
+        flex-shrink: 0;
+        animation: dot-pulse 1.5s ease-in-out infinite;
+    }
+    .step-item:nth-child(2) .step-dot { animation-delay: 0.2s; }
+    .step-item:nth-child(3) .step-dot { animation-delay: 0.4s; }
+    .step-item:nth-child(4) .step-dot { animation-delay: 0.6s; }
+    @keyframes dot-pulse {
+        0%, 100% { opacity: 0.4; transform: scale(1); }
+        50% { opacity: 1; transform: scale(1.3); }
+    }
+    .step-label {
+        font-size: 13px;
+        color: #888;
+        font-weight: 500;
+    }
+    .loading-shimmer-bar {
+        margin-top: 40px;
+        width: 100%;
+        max-width: 320px;
+        height: 4px;
+        background: rgba(102, 126, 234, 0.1);
+        border-radius: 4px;
+        overflow: hidden;
+    }
+    .shimmer-fill {
+        height: 100%;
+        width: 40%;
+        background: linear-gradient(90deg, transparent, #667eea, transparent);
+        border-radius: 4px;
+        animation: shimmer-slide 2s ease-in-out infinite;
+    }
+    @keyframes shimmer-slide {
+        0% { transform: translateX(-100%); }
+        100% { transform: translateX(350%); }
+    }
+</style>
+"""
+
 
 class HtmlRenderer:
     """HTML渲染器 - 支持Markdown转换和流式输出
@@ -23,9 +192,10 @@ class HtmlRenderer:
     BUFFER_TRIM_SIZE = 50_000
     MAX_RENDER_RETRIES = 3
 
-    def __init__(self, parent: tk.Widget, theme: str = "light"):
+    def __init__(self, parent: tk.Widget, theme: str = "light", **grid_kwargs):
         self.parent = parent
         self.theme = theme
+        self._grid_kwargs = grid_kwargs
 
         self._md = markdown.Markdown(
             extensions=[
@@ -40,9 +210,6 @@ class HtmlRenderer:
 
         # 状态变量
         self._buffer = ""
-        self._last_rendered_len = 0
-        self._is_streaming = False
-        self._pending_update = False
         self._render_retry_count = 0
         self._fallback_mode = False
 
@@ -159,59 +326,27 @@ class HtmlRenderer:
             self._buffer = markdown_text
             self._enter_fallback_mode("渲染异常，显示原始内容")
 
-    def start_stream(self):
-        """开始流式输出"""
+    def show_loading(self):
+        """显示等待动画"""
         self._exit_fallback_mode()
         self._buffer = ""
-        self._last_rendered_len = 0
-        self._is_streaming = True
-        self._pending_update = False
         self._render_retry_count = 0
         self._md.reset()
 
-        loading_html = self._wrap_html(
-            '<div style="text-align: center; padding: 20px; color: #667eea;">'
-            '<span style="font-size: 24px;">&#x1F916;</span><br>'
-            '<span style="font-size: 18px; font-weight: 600;">AI 正在思考中...</span>'
-            "</div>"
-        )
+        loading_html = self._wrap_html(LOADING_ANIMATION_HTML)
         self._html_frame.load_html(loading_html)
-
-    def append_chunk(self, chunk: str):
-        """追加流式文本块（公共接口）"""
-        if not self._is_streaming:
-            self.start_stream()
-
-        if len(self._buffer) + len(chunk) > self.MAX_BUFFER_SIZE:
-            self._buffer = self._buffer[-self.BUFFER_TRIM_SIZE :]
-
-        self._buffer += chunk
-        self._schedule_update()
-
-    def finish_stream(self):
-        """完成流式输出"""
-        self._is_streaming = False
-        if self._buffer and not self._fallback_mode:
-            self._schedule_update()
-        self._md.reset()
-
-        try:
-            self._html_frame.yview_moveto(1.0)
-        except Exception:
-            pass
 
     def clear(self):
         """清空内容"""
         self._buffer = ""
         self._md.reset()
-        self._is_streaming = False
-        self._pending_update = False
         self._render_retry_count = 0
+        self._fallback_mode = False
         self._exit_fallback_mode()
         self._load_empty()
 
     def get_content(self) -> str:
-        """获取当前内容（Markdown格式）"""
+        """获取当前内容"""
         return self._buffer
 
     def set_theme(self, theme: str):
@@ -225,7 +360,7 @@ class HtmlRenderer:
             return
 
         if self._buffer:
-            self._schedule_update()
+            self.set_content(self._buffer)
         else:
             self._load_empty()
 
@@ -238,91 +373,6 @@ class HtmlRenderer:
             return True
         except Exception:
             return False
-
-    # ------------------------------------------------------------------ #
-    # 内部渲染逻辑
-    # ------------------------------------------------------------------ #
-
-    def _schedule_update(self):
-        """节流调度：确保同一时间只有一个渲染任务在队列中"""
-        if self._pending_update or self._fallback_mode:
-            return
-        self._pending_update = True
-        self._html_frame.after(self.RENDER_INTERVAL_MS, self._do_render)
-
-    def _do_render(self):
-        """实际渲染执行（带完整异常处理）"""
-        try:
-            self._render_retry_count = 0
-            self._render_once()
-        except Exception as e:
-            self._handle_render_error(e)
-        finally:
-            self._pending_update = False
-
-    def _render_once(self):
-        """单次渲染逻辑"""
-        if not self._buffer:
-            return
-
-        html_body = self._convert_markdown_safe(self._buffer)
-        html_body = self._sanitizer.sanitize(html_body)
-        full_html = self._wrap_html(html_body)
-
-        self._html_frame.load_html(full_html)
-        self._last_rendered_len = len(self._buffer)
-
-        try:
-            self._html_frame.yview_moveto(1.0)
-        except Exception:
-            pass
-
-    def _convert_markdown_safe(self, text: str) -> str:
-        """安全的Markdown/HTML转换：检测内容是否已为HTML"""
-        try:
-            if self._looks_like_html(text):
-                return text
-            self._md.reset()
-            return self._md.convert(text)
-        except Exception:
-            return (
-                text.replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-                .replace("\n", "<br>")
-            )
-
-    @staticmethod
-    def _looks_like_html(text: str) -> bool:
-        """判断文本是否看起来像HTML（而非Markdown）"""
-        html_tags = [
-            "<div",
-            "<h2",
-            "<h3",
-            "<p>",
-            "<ul",
-            "<ol",
-            "<table",
-            "<strong",
-            "<span",
-            "<a href",
-            "<br>",
-            "<li>",
-            "<pre",
-            "<blockquote",
-        ]
-        text_lower = text.lower()
-        return sum(1 for tag in html_tags if tag in text_lower) >= 3
-
-    def _handle_render_error(self, error: Exception):
-        """渲染错误处理"""
-        self._render_retry_count += 1
-
-        if self._render_retry_count < self.MAX_RENDER_RETRIES:
-            self._html_frame.after(500, self._do_render)
-            return
-
-        self._enter_fallback_mode(str(error))
 
     def _enter_fallback_mode(self, error_msg: str):
         """进入降级模式：显示纯文本"""
@@ -345,9 +395,9 @@ class HtmlRenderer:
         self._fallback_text.grid_forget()
         self._fallback_text.delete("1.0", "end")
         self._fallback_text.insert(
-            "1.0", f"[HTML渲染异常，显示原始内容]\n\n{self._buffer}"
+            "1.0", "[HTML渲染异常，显示原始内容]\n\n{}".format(self._buffer)
         )
-        self._fallback_text.grid(row=1, column=0, padx=10, pady=(5, 10), sticky="nsew")
+        self._fallback_text.grid(**self._grid_kwargs)
 
     def _exit_fallback_mode(self):
         """退出降级模式"""
