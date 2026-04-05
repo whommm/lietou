@@ -1,8 +1,8 @@
-"""公司深度调研UI组件模块"""
+"""岗位分析 UI 组件。"""
 
 import customtkinter as ctk
 from tkinter import messagebox
-from typing import Callable, Optional
+from typing import Callable, List, Optional
 
 from ..core.history import HistoryManager
 from ..utils.helpers import copy_to_clipboard
@@ -10,19 +10,20 @@ from .history_widget import HistoryPanel
 from .html_renderer import HtmlRenderer
 
 
-class CompanyResearchWidget(ctk.CTkFrame):
-    """公司深度调研界面组件。"""
+class JobAnalysisWidget(ctk.CTkFrame):
+    """岗位分析页面组件。"""
 
     def __init__(
         self,
         master,
-        on_research: Callable,
+        on_analyze: Callable,
         history_manager: HistoryManager,
+        company_options: List[str],
         theme: str = "light",
         **kwargs,
     ):
         super().__init__(master, **kwargs)
-        self.on_research = on_research
+        self.on_analyze = on_analyze
         self.history_manager = history_manager
         self.theme = theme
 
@@ -30,18 +31,18 @@ class CompanyResearchWidget(ctk.CTkFrame):
         self._showing_history = False
         self._result_buffer = ""
 
-        self._setup_ui()
+        self._setup_ui(company_options)
 
-    def _setup_ui(self):
-        """设置UI布局。"""
+    def _setup_ui(self, company_options: List[str]):
+        """设置 UI 布局。"""
         self.grid_columnconfigure(0, weight=2)
         self.grid_columnconfigure(1, weight=3)
         self.grid_rowconfigure(0, weight=1)
 
-        self._build_input_panel()
+        self._build_input_panel(company_options)
         self._build_result_panel()
 
-    def _build_input_panel(self):
+    def _build_input_panel(self, company_options: List[str]):
         """构建左侧输入面板。"""
         input_frame = ctk.CTkFrame(self)
         input_frame.grid(row=0, column=0, padx=(10, 5), pady=10, sticky="nsew")
@@ -50,54 +51,48 @@ class CompanyResearchWidget(ctk.CTkFrame):
 
         ctk.CTkLabel(
             input_frame,
-            text="公司深度调研",
-            font=ctk.CTkFont(size=16, weight="bold"),
+            text="原始岗位描述 (JD)",
+            font=ctk.CTkFont(size=14, weight="bold"),
         ).grid(row=0, column=0, padx=10, pady=(10, 5), sticky="w")
 
         ctk.CTkLabel(
             input_frame,
-            text="输入目标公司名称，系统将自动搜索公开信息并生成调研报告",
+            text="输入岗位描述，AI将自动分析并生成结构化报告",
             font=ctk.CTkFont(size=12),
             text_color=("gray50", "gray60"),
         ).grid(row=1, column=0, padx=10, pady=(0, 10), sticky="w")
 
-        ctk.CTkLabel(input_frame, text="公司名称:").grid(
-            row=2, column=0, padx=10, pady=(10, 5), sticky="w"
+        ctk.CTkLabel(input_frame, text="参考公司调研（可选）:").grid(
+            row=2, column=0, padx=10, pady=(5, 5), sticky="w"
         )
+        self.company_combo = ctk.CTkComboBox(input_frame, values=company_options)
+        self.company_combo.grid(row=3, column=0, padx=10, pady=(0, 5), sticky="ew")
+        if company_options:
+            self.company_combo.set(company_options[0])
 
-        self.company_entry = ctk.CTkEntry(
-            input_frame,
-            placeholder_text="请输入公司名称，如：华为、字节跳动、Tesla",
-        )
-        self.company_entry.grid(row=3, column=0, padx=10, pady=(0, 10), sticky="ew")
-
-        ctk.CTkLabel(
-            input_frame,
-            text="调研结果会自动保存到历史记录，可在右侧查看和回放。",
-            font=ctk.CTkFont(size=12),
-            text_color=("gray50", "gray60"),
-            justify="left",
-        ).grid(row=4, column=0, padx=10, pady=(0, 10), sticky="nw")
+        self.jd_textbox = ctk.CTkTextbox(input_frame, wrap="word")
+        self.jd_textbox.grid(row=4, column=0, padx=10, pady=5, sticky="nsew")
 
         btn_frame = ctk.CTkFrame(input_frame, fg_color="transparent")
-        btn_frame.grid(row=5, column=0, padx=10, pady=(0, 10), sticky="ew")
+        btn_frame.grid(row=5, column=0, padx=10, pady=10, sticky="ew")
         btn_frame.grid_columnconfigure(0, weight=1)
 
         self.clear_input_btn = ctk.CTkButton(
             btn_frame,
             text="清空",
-            width=60,
+            width=80,
             fg_color="gray",
             command=self._on_clear_input_click,
         )
         self.clear_input_btn.grid(row=0, column=0, padx=5, sticky="w")
 
-        self.research_btn = ctk.CTkButton(
+        self.analyze_btn = ctk.CTkButton(
             btn_frame,
-            text="开始深度调研",
-            command=self._on_research_click,
+            text="开始分析",
+            width=150,
+            command=self._on_analyze_click,
         )
-        self.research_btn.grid(row=0, column=1, padx=5, sticky="e")
+        self.analyze_btn.grid(row=0, column=1, padx=5, sticky="e")
 
     def _build_result_panel(self):
         """构建右侧结果面板。"""
@@ -112,7 +107,7 @@ class CompanyResearchWidget(ctk.CTkFrame):
 
         ctk.CTkLabel(
             header_frame,
-            text="调研报告",
+            text="分析结果",
             font=ctk.CTkFont(size=14, weight="bold"),
         ).pack(side="left")
 
@@ -124,19 +119,18 @@ class CompanyResearchWidget(ctk.CTkFrame):
             text="历史",
             width=60,
             height=28,
-            fg_color="gray",
             command=self._on_history_click,
         )
         self.history_btn.pack(side="right", padx=5)
 
-        self.copy_btn = ctk.CTkButton(
+        self.copy_all_btn = ctk.CTkButton(
             btn_frame,
             text="复制全部",
             width=80,
             height=28,
-            command=self._on_copy_click,
+            command=self._on_copy_all_click,
         )
-        self.copy_btn.pack(side="right", padx=5)
+        self.copy_all_btn.pack(side="right", padx=5)
 
         self.clear_result_btn = ctk.CTkButton(
             btn_frame,
@@ -151,6 +145,34 @@ class CompanyResearchWidget(ctk.CTkFrame):
         self.html_renderer = HtmlRenderer(result_frame, theme=self.theme)
         self.html_renderer.grid(row=1, column=0, padx=10, pady=(5, 10), sticky="nsew")
         self._result_parent = result_frame
+
+    def _on_analyze_click(self):
+        """分析按钮点击事件。"""
+        jd_text = self.get_jd_text()
+        if not jd_text:
+            messagebox.showwarning("提示", "请先输入岗位描述")
+            return
+        self.on_analyze(jd_text, self.get_selected_company())
+
+    def _on_clear_input_click(self):
+        """清空输入。"""
+        self.jd_textbox.delete("1.0", "end")
+
+    def _on_clear_result_click(self):
+        """清空结果。"""
+        self.clear_result()
+
+    def _on_copy_all_click(self):
+        """复制结果。"""
+        content = self.get_result()
+        if not content:
+            messagebox.showwarning("提示", "没有可复制的内容")
+            return
+
+        if copy_to_clipboard(content):
+            messagebox.showinfo("成功", "已复制到剪贴板")
+        else:
+            messagebox.showerror("错误", "复制失败")
 
     def _on_history_click(self):
         """历史按钮点击事件。"""
@@ -180,7 +202,6 @@ class CompanyResearchWidget(ctk.CTkFrame):
         """隐藏历史面板。"""
         if self.history_panel:
             self.history_panel.grid_forget()
-
         self.html_renderer.grid(row=1, column=0, padx=10, pady=(5, 10), sticky="nsew")
         self._showing_history = False
         self.history_btn.configure(text="历史")
@@ -188,38 +209,27 @@ class CompanyResearchWidget(ctk.CTkFrame):
     def _on_load_history(self, record):
         """加载历史记录。"""
         self._hide_history()
+        self.set_jd_text(record.jd_text)
         self.set_result(record.result)
 
-    def _on_research_click(self):
-        """调研按钮点击事件。"""
-        company_name = self.company_entry.get().strip()
-        if not company_name:
-            messagebox.showwarning("提示", "请输入公司名称")
-            return
+    def get_jd_text(self) -> str:
+        """获取 JD 输入内容。"""
+        return self.jd_textbox.get("1.0", "end").strip()
 
-        self.show_loading()
-        self.set_researching(True)
-        self.on_research(company_name)
+    def set_jd_text(self, text: str):
+        """设置 JD 输入内容。"""
+        self.jd_textbox.delete("1.0", "end")
+        self.jd_textbox.insert("1.0", text)
 
-    def _on_clear_input_click(self):
-        """清空输入。"""
-        self.company_entry.delete(0, "end")
+    def get_selected_company(self) -> str:
+        """获取选中的公司调研项。"""
+        return self.company_combo.get().strip()
 
-    def _on_clear_result_click(self):
-        """清空结果。"""
-        self.clear_result()
-
-    def _on_copy_click(self):
-        """复制结果。"""
-        content = self.get_result()
-        if not content:
-            messagebox.showinfo("提示", "没有可复制的内容")
-            return
-
-        if copy_to_clipboard(content):
-            messagebox.showinfo("成功", "已复制到剪贴板")
-        else:
-            messagebox.showerror("错误", "复制失败")
+    def update_company_options(self, values: List[str]):
+        """更新公司调研选项。"""
+        self.company_combo.configure(values=values)
+        if values:
+            self.company_combo.set(values[0])
 
     def show_loading(self):
         """显示加载状态。"""
@@ -235,38 +245,35 @@ class CompanyResearchWidget(ctk.CTkFrame):
         self._result_buffer = ""
         self.html_renderer.clear()
 
-    def set_researching(self, researching: bool):
-        """设置调研状态。"""
-        if researching:
-            self.research_btn.configure(state="disabled", text="调研中...")
-            self.clear_input_btn.configure(state="disabled")
-            self.copy_btn.configure(state="disabled")
-            self.clear_result_btn.configure(state="disabled")
-            self.history_btn.configure(state="disabled")
-            self.company_entry.configure(state="disabled")
-        else:
-            self.research_btn.configure(state="normal", text="开始深度调研")
-            self.clear_input_btn.configure(state="normal")
-            self.copy_btn.configure(state="normal")
-            self.clear_result_btn.configure(state="normal")
-            self.history_btn.configure(state="normal")
-            self.company_entry.configure(state="normal")
-
     def set_result(self, text: str):
-        """设置完整结果并渲染。"""
+        """设置结果内容。"""
         if self._showing_history:
             self._hide_history()
         self._result_buffer = text
         self.html_renderer.set_content(text)
 
     def get_result(self) -> str:
-        """获取完整结果。"""
+        """获取结果内容。"""
         return self._result_buffer
 
-    def refresh_history(self):
-        """刷新历史记录。"""
-        if self.history_panel:
-            self.history_panel.refresh()
+    def set_analyzing(self, analyzing: bool):
+        """设置分析状态。"""
+        if analyzing:
+            self.analyze_btn.configure(state="disabled", text="AI 正在思考中...")
+            self.clear_input_btn.configure(state="disabled")
+            self.copy_all_btn.configure(state="disabled")
+            self.clear_result_btn.configure(state="disabled")
+            self.history_btn.configure(state="disabled")
+            self.company_combo.configure(state="disabled")
+            self.jd_textbox.configure(state="disabled")
+        else:
+            self.analyze_btn.configure(state="normal", text="开始分析")
+            self.clear_input_btn.configure(state="normal")
+            self.copy_all_btn.configure(state="normal")
+            self.clear_result_btn.configure(state="normal")
+            self.history_btn.configure(state="normal")
+            self.company_combo.configure(state="normal")
+            self.jd_textbox.configure(state="normal")
 
     def set_theme(self, theme: str):
         """设置主题。"""

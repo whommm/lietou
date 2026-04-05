@@ -33,6 +33,7 @@ class HistoryManager:
         re.compile(r"岗位[：:]\s*(.+?)(?:\n|$)"),
         re.compile(r"职位[：:]\s*(.+?)(?:\n|$)"),
     ]
+    HTML_TEXT_PATTERN = re.compile(r"<[^>]+>")
 
     def __init__(self, record_type: str = "job_analysis", max_records: int = 50):
         self.record_type = record_type
@@ -87,24 +88,39 @@ class HistoryManager:
             self.records = self.records[: self.max_records]
             self._save_history()
 
+    def _truncate_text(self, text: str, limit: int = 30) -> str:
+        """截断文本并补省略号。"""
+        text = text.strip()
+        if len(text) > limit:
+            return text[:limit] + "..."
+        return text
+
+    def _strip_html(self, text: str) -> str:
+        """去除 HTML 标签，保留可读文本。"""
+        text = self.HTML_TEXT_PATTERN.sub(" ", text)
+        return re.sub(r"\s+", " ", text).strip()
+
     def _extract_title(self, jd_text: str, result: str = "") -> str:
-        """从结果或JD文本中提取标题（岗位名称）"""
+        """从结果或JD文本中提取标题。"""
+        if self.record_type == "company_research":
+            if jd_text.startswith("[公司调研] "):
+                return self._truncate_text(jd_text.replace("[公司调研] ", "", 1), 30)
+            return self._truncate_text(jd_text or "未命名公司", 30)
+
+        if self.record_type == "resume_match":
+            title = self._extract_resume_title(jd_text, result)
+            if title:
+                return title
+            return "简历匹配记录"
+
         if result:
-            # 新格式：纯HTML <h2>岗位名称：xxx</h2>
             match = re.search(r"<h2>[^<]*岗位名称[：:]\s*([^<]+)</h2>", result)
             if match:
-                title = match.group(1).strip()
-                if len(title) > 30:
-                    title = title[:30] + "..."
-                return title
+                return self._truncate_text(match.group(1), 30)
 
-            # 旧格式兼容：【岗位名称】xxx
             match = re.search(r"【岗位名称】(.+?)(?:\n|$)", result)
             if match:
-                title = match.group(1).strip()
-                if len(title) > 30:
-                    title = title[:30] + "..."
-                return title
+                return self._truncate_text(match.group(1), 30)
 
         if not jd_text:
             return "未命名岗位"
@@ -112,20 +128,26 @@ class HistoryManager:
         for pattern in self.TITLE_PATTERNS:
             match = pattern.search(jd_text)
             if match:
-                title = match.group(1).strip()
-                if len(title) > 20:
-                    title = title[:20] + "..."
-                return title
+                return self._truncate_text(match.group(1), 20)
 
         lines = jd_text.strip().split("\n")
         for line in lines:
             line = line.strip()
             if line and len(line) > 2:
-                if len(line) > 20:
-                    return line[:20] + "..."
-                return line
+                return self._truncate_text(line, 20)
 
         return "未命名岗位"
+
+    def _extract_resume_title(self, jd_text: str, result: str = "") -> str:
+        """提取简历匹配标题。"""
+        match = re.search(r"岗位:\s*(.+?)(?:\.\.\.|\n|$)", jd_text)
+        if match:
+            return "简历匹配 - {}".format(self._truncate_text(match.group(1), 22))
+
+        stripped = self._strip_html(result)
+        if stripped:
+            return "简历匹配 - {}".format(self._truncate_text(stripped, 22))
+        return ""
 
     def save_record(self, jd_text: str, result: str) -> HistoryRecord:
         """保存一条新记录"""

@@ -1,4 +1,4 @@
-"""暗色主题CSS - 营销页面风格"""
+"""暗色主题CSS - 专业工具风格。"""
 
 DARK_CSS = """
 /* === 基础样式 === */
@@ -9,7 +9,7 @@ DARK_CSS = """
 body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', 'PingFang SC', Roboto, 'Helvetica Neue', Arial, sans-serif;
     font-size: 20px;
-    color: #e2e8f0;
+    color: #cbd5e1;
     background-color: #0f172a;
     line-height: 1.6;
     padding: 24px;
@@ -53,79 +53,35 @@ h4 {
     margin: 16px 0 8px 0;
 }
 
-/* === 渐变卡片 === */
+/* === 卡片 === */
 .card {
     padding: 20px;
-    border-radius: 12px;
-    margin: 15px 0;
-    box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+    border-radius: 8px;
+    margin: 16px 0;
+    border: 1px solid #334155;
+    background-color: #111827;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.22);
 }
 
 .card h1, .card h2, .card h3, .card h4 {
-    color: inherit;
     border: none;
     padding: 0;
-    margin: 0 0 10px 0;
+    margin: 0 0 12px 0;
+    color: inherit;
 }
 
-.card-blue {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-}
+.card-blue { background-color: #172554; border-color: #1d4ed8; color: #dbeafe; }
+.card-green { background-color: #052e16; border-color: #16a34a; color: #dcfce7; }
+.card-orange { background-color: #431407; border-color: #ea580c; color: #ffedd5; }
+.card-purple { background-color: #3b0764; border-color: #9333ea; color: #f3e8ff; }
+.card-red { background-color: #450a0a; border-color: #dc2626; color: #fee2e2; }
+.card-yellow { background-color: #422006; border-color: #ca8a04; color: #fef9c3; }
+.card-gray { background-color: #111827; border-color: #334155; color: #cbd5e1; }
 
-.card-green {
-    background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
-    color: white;
-}
-
-.card-orange {
-    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-    color: white;
-}
-
-.card-purple {
-    background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-    color: white;
-}
-
-.card-red {
-    background: linear-gradient(135deg, #ff416c 0%, #ff4b2b 100%);
-    color: white;
-}
-
-.card-yellow {
-    background: linear-gradient(135deg, #f7971e 0%, #ffd200 100%);
-    color: white;
-}
-
-.card-gray {
-    background: linear-gradient(135deg, #434343 0%, #000000 100%);
-    color: white;
-}
-
-/* === 浅色卡片（暗色模式下为深色） === */
-.card-light {
-    background: #2d2d4a;
-    border: 1px solid #3a3a5c;
-    color: #e0e0e0;
-}
-
-.card-light-blue {
-    background: linear-gradient(135deg, #2d3a5c 0%, #3a4a7a 100%);
-    border: 1px solid #667eea;
-    color: #e0e0e0;
-}
-
-.card-light-green {
-    background: linear-gradient(135deg, #2d4a3a 0%, #3a5c4a 100%);
-    border: 1px solid #11998e;
-    color: #e0e0e0;
-}
-
-.card-light-orange {
-    background: linear-gradient(135deg, #4a3a2d 0%, #5c4a3a 100%);
-    border: 1px solid #f5576c;
-    color: #e0e0e0;
+.card-light, .card-light-blue, .card-light-green, .card-light-orange {
+    background-color: #0f172a;
+    border: 1px solid #334155;
+    color: #cbd5e1;
 }
 
 /* === 进度条 === */
@@ -136,7 +92,7 @@ h4 {
 .progress-label {
     font-weight: 600;
     margin-bottom: 8px;
-    color: #e0e0e0;
+    color: #e2e8f0;
     display: flex;
     justify-content: space-between;
     font-size: 15px;
@@ -144,10 +100,10 @@ h4 {
 
 .progress-bar {
     height: 24px;
-    background: #2d2d4a;
+    background: #1e293b;
     border-radius: 12px;
     overflow: hidden;
-    box-shadow: inset 0 1px 3px rgba(0,0,0,0.3);
+    box-shadow: inset 0 1px 2px rgba(0,0,0,0.35);
 }
 
 .progress-fill {
@@ -159,16 +115,15 @@ h4 {
     color: white;
     font-weight: 600;
     font-size: 13px;
-    text-shadow: 0 1px 2px rgba(0,0,0,0.3);
-    transition: width 0.5s ease;
+    text-shadow: 0 1px 1px rgba(0,0,0,0.25);
+    transition: width 0.3s ease;
 }
 
-.progress-blue { background: linear-gradient(90deg, #667eea, #764ba2); }
-.progress-green { background: linear-gradient(90deg, #11998e, #38ef7d); }
-.progress-orange { background: linear-gradient(90deg, #f093fb, #f5576c); }
-.progress-purple { background: linear-gradient(90deg, #4facfe, #00f2fe); }
-.progress-red { background: linear-gradient(90deg, #ff416c, #ff4b2b); }
-.progress-yellow { background: linear-gradient(90deg, #f7971e, #ffd200); }
+.progress-blue { background-color: #2563eb; }
+.progress-green { background-color: #16a34a; }
+.progress-orange { background-color: #ea580c; }
+.progress-purple { background-color: #9333ea; }
+.progress-red { background-color: #dc2626; }
 
 /* === 评分条 === */
 .rating {
@@ -179,103 +134,82 @@ h4 {
 }
 
 .rating-label {
-    font-weight: 600;
-    min-width: 100px;
-    color: #e0e0e0;
+    font-weight: 500;
+    min-width: 90px;
+    color: #94a3b8;
+    font-size: 14px;
 }
 
 .rating-bar {
     flex: 1;
-    height: 16px;
-    background: #2d2d4a;
-    border-radius: 8px;
+    height: 8px;
+    background: #1e293b;
+    border-radius: 4px;
     overflow: hidden;
-    box-shadow: inset 0 1px 3px rgba(0,0,0,0.3);
 }
 
 .rating-fill {
     height: 100%;
-    background: linear-gradient(90deg, #667eea, #764ba2);
-    border-radius: 8px;
+    background-color: #22c55e;
+    border-radius: 4px;
 }
 
 .rating-value {
-    font-weight: 700;
-    color: #8ab4f8;
-    min-width: 50px;
+    font-weight: 600;
+    color: #f8fafc;
+    min-width: 40px;
     text-align: right;
-    font-size: 16px;
+    font-size: 14px;
 }
+
+/* === 提示框 === */
+.alert {
+    padding: 12px 16px;
+    border-radius: 6px;
+    margin: 16px 0;
+    border-left: 4px solid;
+    font-size: 14px;
+}
+
+.alert-success { background-color: #052e16; border-left-color: #22c55e; color: #bbf7d0; }
+.alert-warning { background-color: #451a03; border-left-color: #f59e0b; color: #fde68a; }
+.alert-info { background-color: #172554; border-left-color: #3b82f6; color: #bfdbfe; }
+.alert-danger { background-color: #450a0a; border-left-color: #ef4444; color: #fecaca; }
+.alert-primary { background-color: #111827; border-left-color: #64748b; color: #cbd5e1; }
 
 /* === 特性卡片网格 === */
 .feature-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: 15px;
-    margin: 15px 0;
+    gap: 16px;
+    margin: 16px 0;
 }
 
 .feature-card {
-    background: #2d2d4a;
-    border: 1px solid #3a3a5c;
-    border-radius: 12px;
+    background-color: #111827;
+    border: 1px solid #334155;
+    border-radius: 8px;
     padding: 20px;
     text-align: center;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.2);
 }
 
 .feature-icon {
-    font-size: 36px;
-    margin-bottom: 10px;
+    font-size: 32px;
+    margin-bottom: 12px;
+    color: #60a5fa;
 }
 
 .feature-title {
     font-weight: 600;
     font-size: 15px;
-    margin-bottom: 5px;
-    color: #e0e0e0;
+    margin-bottom: 6px;
+    color: #f8fafc;
 }
 
 .feature-desc {
-    color: #d0d0d0;
-    font-size: 15px;
-}
-
-/* === 提示框 === */
-.alert {
-    padding: 15px 20px;
-    border-radius: 10px;
-    margin: 15px 0;
-    border-left: 4px solid;
-}
-
-.alert-success {
-    background: linear-gradient(135deg, #1e3a2d 0%, #2d4a3a 100%);
-    border-color: #38ef7d;
-    color: #a0d8a8;
-}
-
-.alert-warning {
-    background: linear-gradient(135deg, #3a3a1e 0%, #4a4a2d 100%);
-    border-color: #ffc107;
-    color: #e0d0a0;
-}
-
-.alert-info {
-    background: linear-gradient(135deg, #1e2a3a 0%, #2d3a4a 100%);
-    border-color: #17a2b8;
-    color: #a0c8d0;
-}
-
-.alert-danger {
-    background: linear-gradient(135deg, #3a1e2a 0%, #4a2d3a 100%);
-    border-color: #ff4b2b;
-    color: #d8a0a8;
-}
-
-.alert-primary {
-    background: linear-gradient(135deg, #1e2a4a 0%, #2d3a5a 100%);
-    border-color: #667eea;
-    color: #a0b0d8;
+    color: #94a3b8;
+    font-size: 14px;
 }
 
 /* === 标签云 === */
@@ -293,6 +227,9 @@ h4 {
     border-radius: 6px;
     font-size: 15px;
     font-weight: 500;
+    background-color: #1e293b;
+    color: #cbd5e1;
+    border: 1px solid #334155;
     text-decoration: none;
     cursor: pointer;
     transition: all 0.2s ease;
@@ -302,7 +239,7 @@ h4 {
 .tag:hover {
     transform: translateY(-1px);
     box-shadow: 0 2px 4px rgba(0,0,0,0.3);
-    filter: brightness(1.1);
+    filter: brightness(1.05);
     text-decoration: none;
 }
 
@@ -311,122 +248,100 @@ h4 {
     box-shadow: 0 1px 2px rgba(0,0,0,0.2);
 }
 
-.tag-blue { background: #2d3a5c; color: #8ab4f8; border: 1px solid #667eea; }
-.tag-green { background: #2d4a3a; color: #80d8a0; border: 1px solid #38ef7d; }
-.tag-orange { background: #4a3a2d; color: #f8c080; border: 1px solid #f5576c; }
-.tag-purple { background: #3a2d4a; color: #c8a0d8; border: 1px solid #7b1fa2; }
-.tag-red { background: #4a2d2d; color: #f8a0a0; border: 1px solid #ff4b2b; }
-.tag-teal { background: #2d4a4a; color: #80d8d0; border: 1px solid #38ef7d; }
-.tag-indigo { background: #2d2d4a; color: #a0a0d8; border: 1px solid #667eea; }
-.tag-pink { background: #4a2d3a; color: #f8a0c0; border: 1px solid #f093fb; }
+.tag-blue { background-color: #172554; color: #bfdbfe; border-color: #1d4ed8; }
+.tag-green { background-color: #052e16; color: #bbf7d0; border-color: #16a34a; }
+.tag-orange { background-color: #431407; color: #fdba74; border-color: #ea580c; }
+.tag-purple { background-color: #3b0764; color: #e9d5ff; border-color: #9333ea; }
+.tag-red { background-color: #450a0a; color: #fecaca; border-color: #dc2626; }
 
-/* === 精美表格 === */
+/* === 表格 === */
 table {
     border-collapse: collapse;
     width: 100%;
-    margin: 15px 0;
-    border-radius: 10px;
-    overflow: hidden;
-    box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+    margin: 16px 0;
+    font-size: 14px;
 }
 
-th {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-    font-weight: 600;
-    padding: 14px 16px;
+th, td {
+    padding: 10px 14px;
+    border: 1px solid #334155;
     text-align: left;
 }
 
-td {
-    padding: 12px 16px;
-    border-bottom: 1px solid #3a3a5c;
+th {
+    background-color: #111827;
+    color: #f8fafc;
+    font-weight: 600;
 }
 
 tr:nth-child(even) {
-    background: #2d2d4a;
+    background-color: #0f172a;
 }
 
-tr:last-child td {
-    border-bottom: none;
+tr:hover {
+    background-color: #1e293b;
 }
 
 /* === 列表样式 === */
 ul, ol {
-    padding-left: 35px;
-    margin: 14px 0;
-}
-
-li {
-    margin: 12px 0;
-    color: #f5f5f5;
-    font-weight: 500;
-}
-
-/* === 强调文本 === */
-strong, b {
-    color: #ffffff;
-    font-weight: 700;
-}
-
-em, i {
-    font-style: italic;
-    color: #c0c0c0;
+    padding-left: 24px;
+    margin: 12px 0 16px 0;
 }
 
 li {
     margin: 6px 0;
-}
-
-/* === 代码块 === */
-code {
-    background: #2d2d4a;
-    padding: 3px 10px;
-    border-radius: 4px;
-    font-family: 'Consolas', 'Courier New', monospace;
-    font-size: 16px;
-    color: #f472b6;
-}
-
-pre {
-    background: #0d0d1a;
-    color: #d4d4d4;
-    padding: 16px;
-    border-radius: 10px;
-    overflow-x: auto;
-    margin: 15px 0;
-    box-shadow: 0 4px 15px rgba(0,0,0,0.4);
-}
-
-pre code {
-    background: transparent;
-    color: #d4d4d4;
-    padding: 0;
-}
-
-/* === 引用块 === */
-blockquote {
-    border-left: 4px solid #667eea;
-    margin: 15px 0;
-    padding: 12px 20px;
-    background: linear-gradient(135deg, #2d2d4a 0%, #3a3a5c 100%);
-    border-radius: 0 10px 10px 0;
-    color: #b0b0b0;
+    color: #cbd5e1;
 }
 
 /* === 强调文本 === */
 strong, b {
-    color: #ffffff;
+    color: #f8fafc;
     font-weight: 600;
 }
 
 em, i {
     font-style: italic;
+    color: #94a3b8;
+}
+
+/* === 代码块 === */
+code {
+    background-color: #111827;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+    font-size: 13px;
+    color: #f472b6;
+}
+
+pre {
+    background-color: #020617;
+    border: 1px solid #334155;
+    padding: 16px;
+    border-radius: 6px;
+    overflow-x: auto;
+    margin: 16px 0;
+}
+
+pre code {
+    background-color: transparent;
+    color: #cbd5e1;
+    padding: 0;
+    font-size: 13px;
+}
+
+/* === 引用块 === */
+blockquote {
+    border-left: 4px solid #475569;
+    margin: 16px 0;
+    padding: 12px 16px;
+    background-color: #111827;
+    color: #94a3b8;
 }
 
 /* === 链接 === */
 a {
-    color: #8ab4f8;
+    color: #93c5fd;
     text-decoration: none;
 }
 
@@ -437,96 +352,8 @@ a:hover {
 /* === 分隔线 === */
 hr {
     border: none;
-    height: 2px;
-    background: linear-gradient(90deg, #667eea, #764ba2, #f5576c);
-    margin: 25px 0;
-    border-radius: 1px;
-}
-
-/* === 信息卡片 === */
-.info-card {
-    display: flex;
-    align-items: flex-start;
-    gap: 15px;
-    padding: 18px;
-    background: #2d2d4a;
-    border-radius: 12px;
-    margin: 15px 0;
-    border: 1px solid #3a3a5c;
-}
-
-.info-card-icon {
-    font-size: 28px;
-    flex-shrink: 0;
-}
-
-.info-card-content {
-    flex: 1;
-}
-
-.info-card-title {
-    font-weight: 600;
-    font-size: 15px;
-    margin-bottom: 5px;
-    color: #e0e0e0;
-}
-
-.info-card-desc {
-    color: #a0a0a0;
-    font-size: 13px;
-}
-
-/* === 按钮样式 === */
-.btn {
-    display: inline-block;
-    padding: 10px 20px;
-    border-radius: 8px;
-    font-weight: 600;
-    text-align: center;
-    cursor: pointer;
-    text-decoration: none;
-}
-
-.btn-primary {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-}
-
-.btn-success {
-    background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
-    color: white;
-}
-
-.btn-warning {
-    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-    color: white;
-}
-
-/* === 统计数字 === */
-.stat-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-    gap: 15px;
-    margin: 15px 0;
-}
-
-.stat-card {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-    padding: 20px;
-    border-radius: 12px;
-    text-align: center;
-}
-
-.stat-value {
-    font-size: 28px;
-    font-weight: 700;
-}
-
-.stat-label {
-    font-size: 13px;
-    opacity: 0.9;
-    margin-top: 5px;
+    border-top: 1px solid #334155;
+    margin: 20px 0;
 }
 
 /* === 步骤条 === */
@@ -537,13 +364,13 @@ hr {
 .step {
     display: flex;
     align-items: flex-start;
-    margin-bottom: 15px;
+    margin-bottom: 16px;
 }
 
 .step-number {
     width: 32px;
     height: 32px;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background-color: #2563eb;
     color: white;
     border-radius: 50%;
     display: flex;
@@ -562,10 +389,11 @@ hr {
 .step-title {
     font-weight: 600;
     margin-bottom: 3px;
+    color: #f8fafc;
 }
 
 .step-desc {
-    color: #a0a0a0;
+    color: #94a3b8;
     font-size: 13px;
 }
 """

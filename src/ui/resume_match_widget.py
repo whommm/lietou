@@ -2,7 +2,7 @@
 
 import customtkinter as ctk
 from tkinter import messagebox
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict
 
 from .html_renderer import HtmlRenderer
 from ..utils.helpers import copy_to_clipboard
@@ -151,8 +151,7 @@ class ResumeMatchWidget(ctk.CTkFrame):
             return
 
         self.set_matching(True)
-        self._result_buffer = ""
-        self.html_renderer.show_loading()
+        self.show_loading()
         self.on_match(job_desc, resume)
 
     def _on_clear_click(self):
@@ -161,8 +160,7 @@ class ResumeMatchWidget(ctk.CTkFrame):
 
     def _on_clear_result_click(self):
         """清空结果"""
-        self._result_buffer = ""
-        self.html_renderer.clear()
+        self.clear_result()
 
     def _on_copy_all_click(self):
         """复制全部"""
@@ -181,11 +179,15 @@ class ResumeMatchWidget(ctk.CTkFrame):
         if matching:
             self.match_btn.configure(state="disabled", text="分析中...")
             self.clear_btn.configure(state="disabled")
+            self.copy_all_btn.configure(state="disabled")
+            self.clear_result_btn.configure(state="disabled")
             self.job_combo.configure(state="disabled")
             self.resume_text.configure(state="disabled")
         else:
             self.match_btn.configure(state="normal", text="开始匹配分析")
             self.clear_btn.configure(state="normal")
+            self.copy_all_btn.configure(state="normal")
+            self.clear_result_btn.configure(state="normal")
             self.job_combo.configure(state="normal")
             self.resume_text.configure(state="normal")
 
@@ -197,6 +199,20 @@ class ResumeMatchWidget(ctk.CTkFrame):
         self.job_combo.configure(values=job_list)
         if job_list:
             self.job_combo.set(job_list[0])
+
+    def show_loading(self):
+        """显示加载状态。"""
+        self._result_buffer = ""
+        self.html_renderer.show_loading()
+
+    def clear_result(self):
+        """清空结果。"""
+        self._result_buffer = ""
+        self.html_renderer.clear()
+
+    def get_result(self) -> str:
+        """获取结果内容。"""
+        return self._result_buffer
 
     def set_result(self, text: str):
         """设置完整结果并渲染"""

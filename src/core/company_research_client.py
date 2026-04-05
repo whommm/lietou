@@ -1,11 +1,17 @@
 """公司深度调研客户端模块"""
 
-import sys
 import logging
 import os
-from typing import Generator, List, Dict
-from .prompt import COMPANY_RESEARCH_PROMPT
+import sys
+from typing import Dict, List, Optional
+
 from .llm_client import LLMClient
+from .prompt import COMPANY_RESEARCH_PROMPT
+
+try:
+    import trafilatura
+except ImportError:
+    trafilatura = None
 
 if getattr(sys, "frozen", False):
     try:
@@ -88,8 +94,11 @@ class CompanyResearchClient:
         except Exception as e:
             raise CompanyResearchError("搜索失败: {}".format(str(e)))
 
-    def _extract_single_url(self, url: str) -> dict:
+    def _extract_single_url(self, url: str) -> Optional[Dict[str, str]]:
         """提取单个URL的内容"""
+        if trafilatura is None:
+            return None
+
         try:
             downloaded = trafilatura.fetch_url(url)
             if not downloaded:
@@ -115,11 +124,9 @@ class CompanyResearchClient:
             logger.error("提取URL失败 {}: {}".format(url, str(e)))
             return None
 
-    def _extract_contents(self, search_results: List[Dict]) -> List[Dict]:
+    def _extract_contents(self, search_results: List[Dict]) -> List[Dict[str, str]]:
         """并行提取网页详细内容"""
-        try:
-            import trafilatura
-        except ImportError:
+        if trafilatura is None:
             logger.warning("缺少 trafilatura 包，跳过网页内容提取")
             return []
 
@@ -135,7 +142,11 @@ class CompanyResearchClient:
                 for url in urls_to_extract
             }
             for future in as_completed(futures):
-                result = future.result()
+                try:
+                    result = future.result()
+                except Exception as e:
+                    logger.error("并行提取失败 {}: {}".format(futures[future], str(e)))
+                    continue
                 if result:
                     contents.append(result)
 

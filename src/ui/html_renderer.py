@@ -1,11 +1,14 @@
-"""HTML渲染器模块 - 将Markdown转换为精美HTML显示（鲁棒版）"""
+"""HTML渲染器模块。"""
 
-import markdown
+from typing import Dict, Optional
 import tkinter as tk
+
+import customtkinter as ctk
+import markdown
 from tkinterweb import HtmlFrame
-from typing import Optional
-from .themes import LIGHT_CSS, DARK_CSS
+
 from ..utils.html_sanitizer import HtmlSanitizer
+from .themes import DARK_CSS, LIGHT_CSS
 
 LOADING_ANIMATION_HTML = """
 <div class="loading-container">
@@ -178,59 +181,37 @@ LOADING_ANIMATION_HTML = """
 
 
 class HtmlRenderer:
-    """HTML渲染器 - 支持Markdown转换和流式输出
-
-    核心改进：
-    - 节流渲染：300ms最小间隔，防止事件队列洪水
-    - 异常兜底：渲染失败自动降级为纯文本框，不再闪退
-    - HTML补全：自动修复未闭合标签
-    - 缓冲区限制：100KB上限，防止内存泄漏
-    """
-
-    RENDER_INTERVAL_MS = 300
-    MAX_BUFFER_SIZE = 100_000
-    BUFFER_TRIM_SIZE = 50_000
-    MAX_RENDER_RETRIES = 3
+    """HTML渲染器，默认按 HTML 片段渲染，兼容 Markdown 兜底。"""
 
     def __init__(self, parent: tk.Widget, theme: str = "light", **grid_kwargs):
         self.parent = parent
         self.theme = theme
-        self._grid_kwargs = grid_kwargs
+        self._initial_grid_kwargs = grid_kwargs
+        self._layout_manager: Optional[str] = None
+        self._layout_kwargs: Dict[str, object] = {}
 
         self._md = markdown.Markdown(
-            extensions=[
-                "tables",
-                "fenced_code",
-                "nl2br",
-                "sane_lists",
-            ]
+            extensions=["tables", "fenced_code", "nl2br", "sane_lists"]
         )
-
         self._sanitizer = HtmlSanitizer()
-
-        # 状态变量
         self._buffer = ""
-        self._render_retry_count = 0
         self._fallback_mode = False
 
-        # 创建HTML框架
         self._html_frame = HtmlFrame(
             parent,
             messages_enabled=False,
             vertical_scrollbar=True,
             on_link_click=self._handle_link_click,
         )
-
-        # 备用文本框（降级模式使用）
-        self._fallback_text: Optional[tk.Widget] = None
+        self._fallback_text: Optional[ctk.CTkTextbox] = None
 
         self._load_empty()
 
     def _handle_link_click(self, url: str) -> bool:
-        """处理HTML中的链接点击事件"""
+        """处理HTML中的链接点击事件。"""
         if url.startswith("copy://"):
-            import urllib.parse
             import pyperclip
+            import urllib.parse
 
             try:
                 text = urllib.parse.unquote(url[7:])
@@ -241,12 +222,14 @@ class HtmlRenderer:
         return True
 
     def _get_css(self) -> str:
-        """获取当前主题的CSS"""
+        """获取当前主题的CSS。"""
         return DARK_CSS if self.theme == "dark" else LIGHT_CSS
 
     def _wrap_html(self, body_content: str) -> str:
-        """包装完整的HTML文档"""
+        """包装完整HTML文档。"""
         css = self._get_css()
+        scrollbar_track = "#2d2d2d" if self.theme == "dark" else "#f1f1f1"
+        scrollbar_thumb = "#555" if self.theme == "dark" else "#c1c1c1"
         return f"""<!DOCTYPE html>
 <html>
 <head>
@@ -257,10 +240,10 @@ class HtmlRenderer:
             width: 8px;
         }}
         ::-webkit-scrollbar-track {{
-            background: {"#2d2d2d" if self.theme == "dark" else "#f1f1f1"};
+            background: {scrollbar_track};
         }}
         ::-webkit-scrollbar-thumb {{
-            background: {"#555" if self.theme == "dark" else "#c1c1c1"};
+            background: {scrollbar_thumb};
             border-radius: 4px;
         }}
     </style>
@@ -271,101 +254,150 @@ class HtmlRenderer:
 </html>"""
 
     def _load_empty(self):
-        """加载空白内容"""
-        empty_html = self._wrap_html("<p style='color: #999;'>等待分析结果...</p>")
+        """加载空白占位。"""
+        empty_html = self._wrap_html("<p style='color: #999;'>等待结果输出...</p>")
         self._html_frame.load_html(empty_html)
 
-    # ------------------------------------------------------------------ #
-    # 公共接口
-    # ------------------------------------------------------------------ #
+    def _looks_like_html(self, text: str) -> bool:
+        """判断内容是否更像HTML片段。"""
+        lowered = text.lstrip().lower()
+        html_markers = (
+            "<div",
+            "<p",
+            "<h1",
+            "<h2",
+            "<h3",
+            "<ul",
+            "<ol",
+            "<table",
+            "<!doctype",
+            "<html",
+        )
+        return lowered.startswith(html_markers) or "</" in lowered
+
+    def _render_body(self, text: str) -> str:
+        """将输入内容转换为最终HTML body。"""
+        if self._looks_like_html(text):
+            return self._sanitizer.sanitize(text)
+
+        self._md.reset()
+        return self._sanitizer.sanitize(self._md.convert(text))
+
+    def _remember_layout(self, manager: str, kwargs: Dict[str, object]):
+        """记录最近一次有效布局方式。"""
+        self._layout_manager = manager
+        self._layout_kwargs = dict(kwargs)
+
+    def _apply_layout(self, widget):
+        """将最近一次布局方式应用到指定组件。"""
+        manager = self._layout_manager
+        kwargs = self._layout_kwargs or self._initial_grid_kwargs
+
+        if manager is None and not kwargs:
+            return
+
+        if manager == "pack":
+            widget.pack(**kwargs)
+        elif manager == "place":
+            widget.place(**kwargs)
+        else:
+            widget.grid(**kwargs)
+
+    def _forget_layout(self, widget):
+        """根据当前布局管理器隐藏组件。"""
+        manager = self._layout_manager
+        if manager == "pack":
+            widget.pack_forget()
+        elif manager == "place":
+            widget.place_forget()
+        else:
+            widget.grid_forget()
 
     def grid(self, **kwargs):
-        """网格布局"""
+        """网格布局。"""
+        self._remember_layout("grid", kwargs)
         self._html_frame.grid(**kwargs)
 
     def grid_forget(self):
-        """取消网格布局"""
+        """取消网格布局。"""
         self._html_frame.grid_forget()
+        if self._fallback_text is not None:
+            self._fallback_text.grid_forget()
 
     def pack(self, **kwargs):
-        """打包布局"""
+        """打包布局。"""
+        self._remember_layout("pack", kwargs)
         self._html_frame.pack(**kwargs)
 
     def pack_forget(self):
-        """取消打包布局"""
+        """取消打包布局。"""
         self._html_frame.pack_forget()
+        if self._fallback_text is not None:
+            self._fallback_text.pack_forget()
 
     def place(self, **kwargs):
-        """位置布局"""
+        """位置布局。"""
+        self._remember_layout("place", kwargs)
         self._html_frame.place(**kwargs)
 
     def place_forget(self):
-        """取消位置布局"""
+        """取消位置布局。"""
         self._html_frame.place_forget()
+        if self._fallback_text is not None:
+            self._fallback_text.place_forget()
 
     def destroy(self):
-        """销毁组件"""
+        """销毁组件。"""
+        if self._fallback_text is not None:
+            self._fallback_text.destroy()
         self._html_frame.destroy()
 
-    def set_content(self, markdown_text: str):
-        """设置Markdown内容并渲染为HTML"""
-        if not markdown_text or not markdown_text.strip():
-            self._load_empty()
+    def set_content(self, text: str):
+        """设置结果内容并渲染。"""
+        if not text or not text.strip():
+            self.clear()
             return
 
+        self._buffer = text
         self._exit_fallback_mode()
 
         try:
-            self._md.reset()
-            html_body = self._md.convert(markdown_text)
-            html_body = self._sanitizer.sanitize(html_body)
-            full_html = self._wrap_html(html_body)
-            self._html_frame.load_html(full_html)
-            self._buffer = markdown_text
+            html_body = self._render_body(text)
+            self._html_frame.load_html(self._wrap_html(html_body))
         except Exception:
-            self._buffer = markdown_text
-            self._enter_fallback_mode("渲染异常，显示原始内容")
+            self._enter_fallback_mode()
 
     def show_loading(self):
-        """显示等待动画"""
-        self._exit_fallback_mode()
+        """显示等待动画。"""
         self._buffer = ""
-        self._render_retry_count = 0
-        self._md.reset()
-
-        loading_html = self._wrap_html(LOADING_ANIMATION_HTML)
-        self._html_frame.load_html(loading_html)
+        self._exit_fallback_mode()
+        self._html_frame.load_html(self._wrap_html(LOADING_ANIMATION_HTML))
 
     def clear(self):
-        """清空内容"""
+        """清空内容。"""
         self._buffer = ""
-        self._md.reset()
-        self._render_retry_count = 0
-        self._fallback_mode = False
         self._exit_fallback_mode()
         self._load_empty()
 
     def get_content(self) -> str:
-        """获取当前内容"""
+        """获取当前内容。"""
         return self._buffer
 
     def set_theme(self, theme: str):
-        """切换主题"""
+        """切换主题。"""
         if theme not in ("light", "dark"):
             return
 
         self.theme = theme
-
-        if self._fallback_mode and self._fallback_text is not None:
-            return
-
-        if self._buffer:
+        if self._fallback_mode:
+            self._enter_fallback_mode()
+        elif self._buffer:
             self.set_content(self._buffer)
         else:
             self._load_empty()
 
     def copy_to_clipboard(self) -> bool:
-        """复制内容到剪贴板"""
+        """复制当前内容。"""
         try:
             import pyperclip
 
@@ -374,36 +406,26 @@ class HtmlRenderer:
         except Exception:
             return False
 
-    def _enter_fallback_mode(self, error_msg: str):
-        """进入降级模式：显示纯文本"""
+    def _enter_fallback_mode(self):
+        """进入纯文本降级模式。"""
         self._fallback_mode = True
-
-        try:
-            self._html_frame.grid_forget()
-        except Exception:
-            pass
+        self._forget_layout(self._html_frame)
 
         if self._fallback_text is None:
-            import customtkinter as ctk
+            self._fallback_text = ctk.CTkTextbox(self.parent, wrap="word")
 
-            self._fallback_text = ctk.CTkTextbox(
-                self.parent,
-                wrap="word",
-                state="normal",
-            )
-
-        self._fallback_text.grid_forget()
+        self._fallback_text.configure(state="normal")
         self._fallback_text.delete("1.0", "end")
         self._fallback_text.insert(
-            "1.0", "[HTML渲染异常，显示原始内容]\n\n{}".format(self._buffer)
+            "1.0", "[HTML 渲染异常，已切换为原始文本显示]\n\n{}".format(self._buffer)
         )
-        self._fallback_text.grid(**self._grid_kwargs)
+        self._fallback_text.configure(state="disabled")
+        self._forget_layout(self._fallback_text)
+        self._apply_layout(self._fallback_text)
 
     def _exit_fallback_mode(self):
-        """退出降级模式"""
+        """退出纯文本降级模式。"""
         self._fallback_mode = False
         if self._fallback_text is not None:
-            try:
-                self._fallback_text.grid_forget()
-            except Exception:
-                pass
+            self._forget_layout(self._fallback_text)
+        self._apply_layout(self._html_frame)
