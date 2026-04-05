@@ -1,15 +1,19 @@
 """简历匹配组件"""
+
 import customtkinter as ctk
 from tkinter import messagebox
 from typing import Callable, Dict, Optional
 
 from .html_renderer import HtmlRenderer
+from ..utils.helpers import copy_to_clipboard
 
 
 class ResumeMatchWidget(ctk.CTkFrame):
     """简历匹配界面组件"""
 
-    def __init__(self, master, on_match: Callable, job_list: list, theme: str = "light", **kwargs):
+    def __init__(
+        self, master, on_match: Callable, job_list: list, theme: str = "light", **kwargs
+    ):
         super().__init__(master, **kwargs)
         self.on_match = on_match
         self.job_list = job_list
@@ -36,9 +40,7 @@ class ResumeMatchWidget(ctk.CTkFrame):
 
         # 标题
         title_label = ctk.CTkLabel(
-            input_frame,
-            text="简历匹配分析",
-            font=ctk.CTkFont(size=16, weight="bold")
+            input_frame, text="简历匹配分析", font=ctk.CTkFont(size=16, weight="bold")
         )
         title_label.grid(row=0, column=0, padx=10, pady=(10, 5), sticky="w")
 
@@ -47,7 +49,7 @@ class ResumeMatchWidget(ctk.CTkFrame):
             input_frame,
             text="选择已分析的岗位，输入候选人简历进行匹配分析",
             font=ctk.CTkFont(size=12),
-            text_color=("gray50", "gray60")
+            text_color=("gray50", "gray60"),
         )
         desc_label.grid(row=1, column=0, padx=10, pady=(0, 10), sticky="w")
 
@@ -71,14 +73,16 @@ class ResumeMatchWidget(ctk.CTkFrame):
         btn_frame.grid_columnconfigure(0, weight=1)
 
         self.clear_btn = ctk.CTkButton(
-            btn_frame, text="清空", width=60, fg_color="gray",
-            command=self._on_clear_click
+            btn_frame,
+            text="清空",
+            width=60,
+            fg_color="gray",
+            command=self._on_clear_click,
         )
         self.clear_btn.grid(row=0, column=0, padx=5, sticky="w")
 
         self.match_btn = ctk.CTkButton(
-            btn_frame, text="开始匹配分析",
-            command=self._on_match_click
+            btn_frame, text="开始匹配分析", command=self._on_match_click
         )
         self.match_btn.grid(row=0, column=1, padx=5, sticky="e")
 
@@ -95,9 +99,7 @@ class ResumeMatchWidget(ctk.CTkFrame):
         header_frame.grid_columnconfigure(0, weight=1)
 
         ctk.CTkLabel(
-            header_frame,
-            text="匹配结果",
-            font=ctk.CTkFont(size=14, weight="bold")
+            header_frame, text="匹配结果", font=ctk.CTkFont(size=14, weight="bold")
         ).pack(side="left")
 
         # 按钮区
@@ -105,14 +107,21 @@ class ResumeMatchWidget(ctk.CTkFrame):
         btn_frame.pack(side="right")
 
         self.copy_all_btn = ctk.CTkButton(
-            btn_frame, text="复制全部", width=80, height=28,
-            command=self._on_copy_all_click
+            btn_frame,
+            text="复制全部",
+            width=80,
+            height=28,
+            command=self._on_copy_all_click,
         )
         self.copy_all_btn.pack(side="right", padx=5)
 
         self.clear_result_btn = ctk.CTkButton(
-            btn_frame, text="清空", width=60, height=28,
-            fg_color="gray", command=self._on_clear_result_click
+            btn_frame,
+            text="清空",
+            width=60,
+            height=28,
+            fg_color="gray",
+            command=self._on_clear_result_click,
         )
         self.clear_result_btn.pack(side="right", padx=5)
 
@@ -162,11 +171,9 @@ class ResumeMatchWidget(ctk.CTkFrame):
             messagebox.showinfo("提示", "没有可复制的内容")
             return
 
-        try:
-            import pyperclip
-            pyperclip.copy(content)
+        if copy_to_clipboard(content):
             messagebox.showinfo("成功", "已复制到剪贴板")
-        except Exception:
+        else:
             messagebox.showerror("错误", "复制失败")
 
     def set_matching(self, matching: bool):

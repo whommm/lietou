@@ -2,6 +2,7 @@
 
 import json
 import os
+import sys
 from dataclasses import dataclass, asdict
 from typing import Optional
 
@@ -9,6 +10,7 @@ from typing import Optional
 @dataclass
 class AppConfig:
     """应用配置数据类"""
+
     api_base_url: str = ""
     api_key: str = ""
     model_name: str = "deepseek-chat"
@@ -32,17 +34,19 @@ class ConfigManager:
     def _get_default_config_path(self) -> str:
         """获取默认配置文件路径"""
         # 支持打包后的路径
-        if getattr(os.sys, 'frozen', False):
-            base_dir = os.path.dirname(os.sys.executable)
+        if getattr(sys, "frozen", False):
+            base_dir = os.path.dirname(sys.executable)
         else:
-            base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            base_dir = os.path.dirname(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            )
         return os.path.join(base_dir, "config.json")
 
     def _load_config(self) -> AppConfig:
         """从文件加载配置"""
         if os.path.exists(self.config_path):
             try:
-                with open(self.config_path, 'r', encoding='utf-8') as f:
+                with open(self.config_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
                 return AppConfig(**data)
             except (json.JSONDecodeError, TypeError, KeyError):
@@ -52,7 +56,7 @@ class ConfigManager:
     def save_config(self) -> bool:
         """保存配置到文件"""
         try:
-            with open(self.config_path, 'w', encoding='utf-8') as f:
+            with open(self.config_path, "w", encoding="utf-8") as f:
                 json.dump(asdict(self.config), f, ensure_ascii=False, indent=2)
             return True
         except IOError:

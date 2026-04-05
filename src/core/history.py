@@ -3,6 +3,8 @@
 import json
 import os
 import re
+import random
+import sys
 from datetime import datetime
 from dataclasses import dataclass, asdict
 from typing import List, Optional
@@ -11,6 +13,7 @@ from typing import List, Optional
 @dataclass
 class HistoryRecord:
     """历史记录数据类"""
+
     id: str = ""
     title: str = ""
     jd_text: str = ""
@@ -24,11 +27,11 @@ class HistoryManager:
 
     # 缓存正则表达式，避免重复编译
     TITLE_PATTERNS = [
-        re.compile(r'岗位名称[：:]\s*(.+?)(?:\n|$)'),
-        re.compile(r'职位名称[：:]\s*(.+?)(?:\n|$)'),
-        re.compile(r'招聘岗位[：:]\s*(.+?)(?:\n|$)'),
-        re.compile(r'岗位[：:]\s*(.+?)(?:\n|$)'),
-        re.compile(r'职位[：:]\s*(.+?)(?:\n|$)'),
+        re.compile(r"岗位名称[：:]\s*(.+?)(?:\n|$)"),
+        re.compile(r"职位名称[：:]\s*(.+?)(?:\n|$)"),
+        re.compile(r"招聘岗位[：:]\s*(.+?)(?:\n|$)"),
+        re.compile(r"岗位[：:]\s*(.+?)(?:\n|$)"),
+        re.compile(r"职位[：:]\s*(.+?)(?:\n|$)"),
     ]
 
     def __init__(self, record_type: str = "job_analysis", max_records: int = 50):
@@ -40,15 +43,17 @@ class HistoryManager:
 
     def _get_history_path(self, record_type: str) -> str:
         """根据类型获取历史记录文件路径"""
-        if getattr(os.sys, 'frozen', False):
-            base_dir = os.path.dirname(os.sys.executable)
+        if getattr(sys, "frozen", False):
+            base_dir = os.path.dirname(sys.executable)
         else:
-            base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            base_dir = os.path.dirname(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            )
 
         filename_map = {
             "job_analysis": "history_job_analysis.json",
             "resume_match": "history_resume_match.json",
-            "company_research": "history_company_research.json"
+            "company_research": "history_company_research.json",
         }
         filename = filename_map.get(record_type, "history.json")
         return os.path.join(base_dir, filename)
@@ -57,7 +62,7 @@ class HistoryManager:
         """从文件加载历史记录"""
         if os.path.exists(self.history_path):
             try:
-                with open(self.history_path, 'r', encoding='utf-8') as f:
+                with open(self.history_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
                 return [HistoryRecord(**item) for item in data]
             except (json.JSONDecodeError, TypeError, KeyError):
@@ -67,8 +72,10 @@ class HistoryManager:
     def _save_history(self) -> bool:
         """保存历史记录到文件"""
         try:
-            with open(self.history_path, 'w', encoding='utf-8') as f:
-                json.dump([asdict(r) for r in self.records], f, ensure_ascii=False, indent=2)
+            with open(self.history_path, "w", encoding="utf-8") as f:
+                json.dump(
+                    [asdict(r) for r in self.records], f, ensure_ascii=False, indent=2
+                )
             return True
         except IOError:
             return False
@@ -77,14 +84,14 @@ class HistoryManager:
         """强制执行记录数量限制"""
         if len(self.records) > self.max_records:
             # 保留最新的记录
-            self.records = self.records[:self.max_records]
+            self.records = self.records[: self.max_records]
             self._save_history()
 
     def _extract_title(self, jd_text: str, result: str = "") -> str:
         """从结果或JD文本中提取标题（岗位名称）"""
         if result:
             # 新格式：纯HTML <h2>岗位名称：xxx</h2>
-            match = re.search(r'<h2>[^<]*岗位名称[：:]\s*([^<]+)</h2>', result)
+            match = re.search(r"<h2>[^<]*岗位名称[：:]\s*([^<]+)</h2>", result)
             if match:
                 title = match.group(1).strip()
                 if len(title) > 30:
@@ -92,7 +99,7 @@ class HistoryManager:
                 return title
 
             # 旧格式兼容：【岗位名称】xxx
-            match = re.search(r'【岗位名称】(.+?)(?:\n|$)', result)
+            match = re.search(r"【岗位名称】(.+?)(?:\n|$)", result)
             if match:
                 title = match.group(1).strip()
                 if len(title) > 30:
@@ -110,7 +117,7 @@ class HistoryManager:
                     title = title[:20] + "..."
                 return title
 
-        lines = jd_text.strip().split('\n')
+        lines = jd_text.strip().split("\n")
         for line in lines:
             line = line.strip()
             if line and len(line) > 2:
@@ -124,12 +131,12 @@ class HistoryManager:
         """保存一条新记录"""
         now = datetime.now()
         record = HistoryRecord(
-            id=now.strftime("%Y%m%d_%H%M%S"),
+            id=now.strftime("%Y%m%d_%H%M%S_") + str(random.randint(100, 999)),
             title=self._extract_title(jd_text, result),
             jd_text=jd_text,
             result=result,
             created_at=now.strftime("%Y-%m-%d %H:%M:%S"),
-            record_type=self.record_type
+            record_type=self.record_type,
         )
         self.records.insert(0, record)
         self._enforce_limit()
@@ -164,12 +171,12 @@ class HistoryManager:
     def export_txt(self, filepath: str) -> bool:
         """导出所有历史记录为TXT文件"""
         try:
-            with open(filepath, 'w', encoding='utf-8') as f:
+            with open(filepath, "w", encoding="utf-8") as f:
                 for record in self.records:
-                    f.write(f"{'='*60}\n")
+                    f.write(f"{'=' * 60}\n")
                     f.write(f"岗位：{record.title}\n")
                     f.write(f"时间：{record.created_at}\n")
-                    f.write(f"{'='*60}\n\n")
+                    f.write(f"{'=' * 60}\n\n")
                     f.write(f"【原始JD】\n{record.jd_text}\n\n")
                     f.write(f"【分析结果】\n{record.result}\n\n\n")
             return True

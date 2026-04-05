@@ -1,92 +1,27 @@
 """公司深度调研客户端模块"""
 
 import sys
-if sys.version_info < (3, 9):
-    from typing import Dict as dict
-
-from tavily import TavilyClient
+import logging
+import os
 from typing import Generator, List, Dict
 from .prompt import COMPANY_RESEARCH_PROMPT
 from .llm_client import LLMClient
-import logging
-import os
-import sys
 
-# 设置SSL证书路径，解决打包后HTTPS请求问题
-if getattr(sys, 'frozen', False):
+if getattr(sys, "frozen", False):
     try:
         import certifi
-        os.environ['REQUESTS_CA_BUNDLE'] = certifi.where()
-        os.environ['CURL_CA_BUNDLE'] = certifi.where()
+
+        os.environ["REQUESTS_CA_BUNDLE"] = certifi.where()
+        os.environ["CURL_CA_BUNDLE"] = certifi.where()
     except ImportError:
         pass
 
-import trafilatura
-
-# 配置日志
 logger = logging.getLogger(__name__)
-
-def setup_logging():
-    """设置日志系统"""
-    try:
-        # 确定日志目录
-        if getattr(sys, 'frozen', False):
-            # 打包后的环境：优先使用exe所在目录，失败则使用用户目录
-            base_dir = os.path.dirname(sys.executable)
-            log_dir = os.path.join(base_dir, 'logs')
-            
-            # 尝试创建日志目录，如果失败则使用用户目录
-            try:
-                os.makedirs(log_dir, exist_ok=True)
-            except (OSError, PermissionError):
-                # 回退到用户AppData目录
-                appdata = os.environ.get('LOCALAPPDATA') or os.environ.get('APPDATA')
-                if appdata:
-                    log_dir = os.path.join(appdata, '智能岗位分析助手', 'logs')
-                    os.makedirs(log_dir, exist_ok=True)
-                else:
-                    # 最后回退到临时目录
-                    import tempfile
-                    log_dir = os.path.join(tempfile.gettempdir(), '智能岗位分析助手_logs')
-                    os.makedirs(log_dir, exist_ok=True)
-        else:
-            # 开发环境
-            base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-            log_dir = os.path.join(base_dir, 'logs')
-            os.makedirs(log_dir, exist_ok=True)
-        
-        log_file = os.path.join(log_dir, 'company_research.log')
-        
-        # 配置文件日志处理器
-        file_handler = logging.FileHandler(log_file, encoding='utf-8')
-        file_handler.setLevel(logging.DEBUG)
-        file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-        
-        # 获取根日志记录器并配置
-        root_logger = logging.getLogger()
-        root_logger.setLevel(logging.DEBUG)
-        root_logger.addHandler(file_handler)
-        
-        # 如果是开发环境，也输出到控制台
-        if not getattr(sys, 'frozen', False):
-            console_handler = logging.StreamHandler()
-            console_handler.setLevel(logging.DEBUG)
-            console_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-            root_logger.addHandler(console_handler)
-        
-        logger.info("日志系统初始化完成，日志文件: {}".format(log_file))
-        return True
-        
-    except Exception as e:
-        logger.warning("日志系统初始化失败: {}".format(str(e)))
-        return False
-
-# 初始化日志系统
-setup_logging()
 
 
 class CompanyResearchError(Exception):
     """公司调研异常基类"""
+
     pass
 
 
@@ -95,6 +30,12 @@ class CompanyResearchClient:
 
     def __init__(self, tavily_api_key: str, llm_client: LLMClient):
         """初始化调研客户端"""
+        try:
+            from tavily import TavilyClient
+        except ImportError:
+            raise CompanyResearchError(
+                "缺少 tavily-python 包，请运行 pip install tavily-python"
+            )
         self.tavily = TavilyClient(api_key=tavily_api_key)
         self.llm = llm_client
 
@@ -121,9 +62,7 @@ class CompanyResearchClient:
         yield "---\n\n"
 
         report_generator = self._generate_report(
-            company_name,
-            search_results,
-            detailed_contents
+            company_name, search_results, detailed_contents
         )
 
         for chunk in report_generator:
@@ -134,7 +73,7 @@ class CompanyResearchClient:
         try:
             queries = [
                 "{} 公司简介 主营业务".format(company_name),
-                "{} 最新动态 新闻".format(company_name)
+                "{} 最新动态 新闻".format(company_name),
             ]
 
             all_results = []
@@ -144,22 +83,22 @@ class CompanyResearchClient:
                     search_depth="advanced",
                     max_results=5,
                     topic="general",
-                    include_answer=True
+                    include_answer=True,
                 )
-                results = response.get('results', [])
+                results = response.get("results", [])
                 all_results.extend(results)
 
             # 去重（基于URL）
             seen_urls = set()
             unique_results = []
             for result in all_results:
-                url = result.get('url', '')
+                url = result.get("url", "")
                 if url and url not in seen_urls:
                     seen_urls.add(url)
                     unique_results.append(result)
 
             # 按评分排序，取前10个
-            unique_results.sort(key=lambda x: x.get('score', 0), reverse=True)
+            unique_results.sort(key=lambda x: x.get("score", 0), reverse=True)
             return unique_results[:10]
 
         except Exception as e:
@@ -167,12 +106,20 @@ class CompanyResearchClient:
 
     def _extract_contents(self, search_results: List[Dict]) -> List[Dict]:
         """提取网页详细内容"""
+        try:
+            import trafilatura
+        except ImportError:
+            logger.warning("缺少 trafilatura 包，跳过网页内容提取")
+            return []
+
         contents = []
-        urls_to_extract = [r['url'] for r in search_results[:5] if r.get('url')]
+        urls_to_extract = [r["url"] for r in search_results[:5] if r.get("url")]
         logger.info("准备提取 {} 个URL的内容".format(len(urls_to_extract)))
 
         for idx, url in enumerate(urls_to_extract):
-            logger.info("正在提取第 {}/{} 个URL: {}".format(idx+1, len(urls_to_extract), url))
+            logger.info(
+                "正在提取第 {}/{} 个URL: {}".format(idx + 1, len(urls_to_extract), url)
+            )
             try:
                 downloaded = trafilatura.fetch_url(url)
                 if not downloaded:
@@ -186,16 +133,13 @@ class CompanyResearchClient:
                     output_format="txt",
                     include_tables=True,
                     include_comments=False,
-                    favor_recall=True
+                    favor_recall=True,
                 )
 
                 if content:
                     logger.info("提取到内容长度: {} 字符".format(len(content)))
                     if len(content) > 50:
-                        contents.append({
-                            'url': url,
-                            'content': content[:4000]
-                        })
+                        contents.append({"url": url, "content": content[:4000]})
                         logger.info("成功添加URL内容: {}".format(url))
                     else:
                         logger.warning("内容太短，跳过: {}".format(url))
@@ -209,24 +153,32 @@ class CompanyResearchClient:
         logger.info("最终成功提取 {} 个网页内容".format(len(contents)))
         return contents
 
-    def _generate_report(self, company_name: str, search_results: List[Dict],
-                        detailed_contents: List[Dict]) -> Generator[str, None, None]:
+    def _generate_report(
+        self,
+        company_name: str,
+        search_results: List[Dict],
+        detailed_contents: List[Dict],
+    ) -> Generator[str, None, None]:
         """生成调研报告"""
         # 构建搜索摘要
-        sources_text = "\n".join([
-            "- [{}]({}): {}".format(
-                r.get('title', '无标题'),
-                r.get('url', ''),
-                r.get('content', '')[:200]
-            )
-            for r in search_results[:5]
-        ])
+        sources_text = "\n".join(
+            [
+                "- [{}]({}): {}".format(
+                    r.get("title", "无标题"),
+                    r.get("url", ""),
+                    r.get("content", "")[:200],
+                )
+                for r in search_results[:5]
+            ]
+        )
 
         # 构建详细内容
-        detailed_text = "\n\n".join([
-            "### 来源: {}\n{}".format(c['url'], c['content'])
-            for c in detailed_contents
-        ])
+        detailed_text = "\n\n".join(
+            [
+                "### 来源: {}\n{}".format(c["url"], c["content"])
+                for c in detailed_contents
+            ]
+        )
 
         if not detailed_text:
             detailed_text = "未获取到详细网页内容"
@@ -235,9 +187,8 @@ class CompanyResearchClient:
         prompt = COMPANY_RESEARCH_PROMPT.format(
             company_name=company_name,
             sources=sources_text,
-            detailed_content=detailed_text
+            detailed_content=detailed_text,
         )
 
         # 调用LLM生成报告（流式）
         return self.llm.chat_stream(prompt)
-

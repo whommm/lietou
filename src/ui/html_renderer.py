@@ -27,12 +27,14 @@ class HtmlRenderer:
         self.parent = parent
         self.theme = theme
 
-        self._md = markdown.Markdown(extensions=[
-            'tables',
-            'fenced_code',
-            'nl2br',
-            'sane_lists',
-        ])
+        self._md = markdown.Markdown(
+            extensions=[
+                "tables",
+                "fenced_code",
+                "nl2br",
+                "sane_lists",
+            ]
+        )
 
         self._sanitizer = HtmlSanitizer()
 
@@ -62,9 +64,9 @@ class HtmlRenderer:
         if url.startswith("copy://"):
             import urllib.parse
             import pyperclip
+
             try:
                 text = urllib.parse.unquote(url[7:])
-                text = urllib.parse.unquote(text)
                 pyperclip.copy(text)
             except Exception:
                 pass
@@ -88,10 +90,10 @@ class HtmlRenderer:
             width: 8px;
         }}
         ::-webkit-scrollbar-track {{
-            background: {'#2d2d2d' if self.theme == 'dark' else '#f1f1f1'};
+            background: {"#2d2d2d" if self.theme == "dark" else "#f1f1f1"};
         }}
         ::-webkit-scrollbar-thumb {{
-            background: {'#555' if self.theme == 'dark' else '#c1c1c1'};
+            background: {"#555" if self.theme == "dark" else "#c1c1c1"};
             border-radius: 4px;
         }}
     </style>
@@ -171,7 +173,7 @@ class HtmlRenderer:
             '<div style="text-align: center; padding: 20px; color: #667eea;">'
             '<span style="font-size: 24px;">&#x1F916;</span><br>'
             '<span style="font-size: 18px; font-weight: 600;">AI 正在思考中...</span>'
-            '</div>'
+            "</div>"
         )
         self._html_frame.load_html(loading_html)
 
@@ -181,7 +183,7 @@ class HtmlRenderer:
             self.start_stream()
 
         if len(self._buffer) + len(chunk) > self.MAX_BUFFER_SIZE:
-            self._buffer = self._buffer[-self.BUFFER_TRIM_SIZE:]
+            self._buffer = self._buffer[-self.BUFFER_TRIM_SIZE :]
 
         self._buffer += chunk
         self._schedule_update()
@@ -231,6 +233,7 @@ class HtmlRenderer:
         """复制内容到剪贴板"""
         try:
             import pyperclip
+
             pyperclip.copy(self._buffer)
             return True
         except Exception:
@@ -275,16 +278,41 @@ class HtmlRenderer:
             pass
 
     def _convert_markdown_safe(self, text: str) -> str:
-        """安全的Markdown转换"""
+        """安全的Markdown/HTML转换：检测内容是否已为HTML"""
         try:
+            if self._looks_like_html(text):
+                return text
             self._md.reset()
             return self._md.convert(text)
         except Exception:
-            return (text
-                    .replace('&', '&amp;')
-                    .replace('<', '&lt;')
-                    .replace('>', '&gt;')
-                    .replace('\n', '<br>'))
+            return (
+                text.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\n", "<br>")
+            )
+
+    @staticmethod
+    def _looks_like_html(text: str) -> bool:
+        """判断文本是否看起来像HTML（而非Markdown）"""
+        html_tags = [
+            "<div",
+            "<h2",
+            "<h3",
+            "<p>",
+            "<ul",
+            "<ol",
+            "<table",
+            "<strong",
+            "<span",
+            "<a href",
+            "<br>",
+            "<li>",
+            "<pre",
+            "<blockquote",
+        ]
+        text_lower = text.lower()
+        return sum(1 for tag in html_tags if tag in text_lower) >= 3
 
     def _handle_render_error(self, error: Exception):
         """渲染错误处理"""
@@ -307,6 +335,7 @@ class HtmlRenderer:
 
         if self._fallback_text is None:
             import customtkinter as ctk
+
             self._fallback_text = ctk.CTkTextbox(
                 self.parent,
                 wrap="word",
@@ -315,8 +344,8 @@ class HtmlRenderer:
 
         self._fallback_text.grid_forget()
         self._fallback_text.delete("1.0", "end")
-        self._fallback_text.insert("1.0",
-            f"[HTML渲染异常，显示原始内容]\n\n{self._buffer}"
+        self._fallback_text.insert(
+            "1.0", f"[HTML渲染异常，显示原始内容]\n\n{self._buffer}"
         )
         self._fallback_text.grid(row=1, column=0, padx=10, pady=(5, 10), sticky="nsew")
 
@@ -328,14 +357,3 @@ class HtmlRenderer:
                 self._fallback_text.grid_forget()
             except Exception:
                 pass
-
-
-class HtmlResultWidget(HtmlRenderer):
-    """HTML结果显示组件 - 带工具栏"""
-
-    def __init__(self, parent: tk.Widget, theme: str = "light",
-                 on_copy=None, on_clear=None, on_export=None):
-        super().__init__(parent, theme)
-        self._on_copy = on_copy
-        self._on_clear = on_clear
-        self._on_export = on_export

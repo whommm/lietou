@@ -7,7 +7,13 @@ from typing import Optional, List
 
 from ..core.config import ConfigManager
 from ..core.history import HistoryManager
-from ..core.llm_client import LLMClient, LLMClientError, AuthError, NetworkError, TimeoutError
+from ..core.llm_client import (
+    LLMClient,
+    LLMClientError,
+    AuthError,
+    NetworkError,
+    TimeoutError,
+)
 from ..utils.helpers import copy_to_clipboard, validate_url, validate_api_key
 from .history_widget import HistoryPanel
 from .html_renderer import HtmlRenderer
@@ -42,6 +48,8 @@ class MainWindow(ctk.CTk):
 
         # 分析线程
         self._analysis_thread: Optional[threading.Thread] = None
+        self._resume_match_thread: Optional[threading.Thread] = None
+        self._company_research_thread: Optional[threading.Thread] = None
         self._stop_flag = False
 
         # 原始结果文本 - 使用list收集chunk，最后合并
@@ -83,35 +91,59 @@ class MainWindow(ctk.CTk):
         config_frame.grid_columnconfigure(3, weight=1)
 
         # 第一行：LLM配置
-        ctk.CTkLabel(config_frame, text="API 地址:").grid(row=0, column=0, padx=(10, 5), pady=10, sticky="w")
-        self.url_entry = ctk.CTkEntry(config_frame, placeholder_text="https://api.deepseek.com/v1")
+        ctk.CTkLabel(config_frame, text="API 地址:").grid(
+            row=0, column=0, padx=(10, 5), pady=10, sticky="w"
+        )
+        self.url_entry = ctk.CTkEntry(
+            config_frame, placeholder_text="https://api.deepseek.com/v1"
+        )
         self.url_entry.grid(row=0, column=1, padx=5, pady=10, sticky="ew")
 
-        ctk.CTkLabel(config_frame, text="API Key:").grid(row=0, column=2, padx=(20, 5), pady=10, sticky="w")
-        self.key_entry = ctk.CTkEntry(config_frame, placeholder_text="sk-xxx...", show="*")
+        ctk.CTkLabel(config_frame, text="API Key:").grid(
+            row=0, column=2, padx=(20, 5), pady=10, sticky="w"
+        )
+        self.key_entry = ctk.CTkEntry(
+            config_frame, placeholder_text="sk-xxx...", show="*"
+        )
         self.key_entry.grid(row=0, column=3, padx=5, pady=10, sticky="ew")
 
-        ctk.CTkLabel(config_frame, text="模型:").grid(row=0, column=4, padx=(20, 5), pady=10, sticky="w")
-        self.model_entry = ctk.CTkEntry(config_frame, placeholder_text="deepseek-chat", width=220)
+        ctk.CTkLabel(config_frame, text="模型:").grid(
+            row=0, column=4, padx=(20, 5), pady=10, sticky="w"
+        )
+        self.model_entry = ctk.CTkEntry(
+            config_frame, placeholder_text="deepseek-chat", width=220
+        )
         self.model_entry.grid(row=0, column=5, padx=5, pady=10)
 
-        self.save_btn = ctk.CTkButton(config_frame, text="保存配置", width=100, command=self._on_save_config)
+        self.save_btn = ctk.CTkButton(
+            config_frame, text="保存配置", width=100, command=self._on_save_config
+        )
         self.save_btn.grid(row=0, column=6, padx=(20, 10), pady=10)
 
-        self.theme_switch = ctk.CTkSwitch(config_frame, text="深色模式", command=self._on_theme_toggle)
+        self.theme_switch = ctk.CTkSwitch(
+            config_frame, text="深色模式", command=self._on_theme_toggle
+        )
         self.theme_switch.grid(row=0, column=7, padx=(10, 5), pady=10)
         if self.config_manager.config.theme == "dark":
             self.theme_switch.select()
 
-        self.stream_switch = ctk.CTkSwitch(config_frame, text="流式输出", command=self._on_stream_toggle)
+        self.stream_switch = ctk.CTkSwitch(
+            config_frame, text="流式输出", command=self._on_stream_toggle
+        )
         self.stream_switch.grid(row=0, column=8, padx=(5, 5), pady=10)
         if self.config_manager.config.stream_mode:
             self.stream_switch.select()
 
         # 第二行：Tavily API Key
-        ctk.CTkLabel(config_frame, text="Tavily Key:").grid(row=1, column=0, padx=(10, 5), pady=(0, 10), sticky="w")
-        self.tavily_key_entry = ctk.CTkEntry(config_frame, placeholder_text="tvly-xxx... (用于公司调研)", show="*")
-        self.tavily_key_entry.grid(row=1, column=1, columnspan=5, padx=5, pady=(0, 10), sticky="ew")
+        ctk.CTkLabel(config_frame, text="Tavily Key:").grid(
+            row=1, column=0, padx=(10, 5), pady=(0, 10), sticky="w"
+        )
+        self.tavily_key_entry = ctk.CTkEntry(
+            config_frame, placeholder_text="tvly-xxx... (用于公司调研)", show="*"
+        )
+        self.tavily_key_entry.grid(
+            row=1, column=1, columnspan=5, padx=5, pady=(0, 10), sticky="ew"
+        )
 
     def _build_main_content(self):
         """构建主内容区"""
@@ -152,9 +184,11 @@ class MainWindow(ctk.CTk):
             self.tab_resume,
             on_match=self._on_resume_match,
             job_list=["请先分析岗位"],
-            theme=self.config_manager.config.theme
+            theme=self.config_manager.config.theme,
         )
-        self.resume_match_widget.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=5, pady=5)
+        self.resume_match_widget.grid(
+            row=0, column=0, columnspan=2, sticky="nsew", padx=5, pady=5
+        )
 
     def _build_company_research_tab(self):
         """构建公司调研标签页"""
@@ -166,9 +200,11 @@ class MainWindow(ctk.CTk):
             self.tab_company,
             on_research=self._on_company_research,
             history_manager=self.company_history_manager,
-            theme=self.config_manager.config.theme
+            theme=self.config_manager.config.theme,
         )
-        self.company_research_widget.grid(row=0, column=0, columnspan=2, sticky="nsew", padx=5, pady=5)
+        self.company_research_widget.grid(
+            row=0, column=0, columnspan=2, sticky="nsew", padx=5, pady=5
+        )
 
     def _build_input_panel(self, parent):
         """构建左侧输入面板"""
@@ -178,15 +214,19 @@ class MainWindow(ctk.CTk):
         input_frame.grid_rowconfigure(3, weight=1)
 
         # 标题
-        ctk.CTkLabel(input_frame, text="原始岗位描述 (JD)", font=ctk.CTkFont(size=14, weight="bold")).grid(
-            row=0, column=0, padx=10, pady=(10, 5), sticky="w"
-        )
+        ctk.CTkLabel(
+            input_frame,
+            text="原始岗位描述 (JD)",
+            font=ctk.CTkFont(size=14, weight="bold"),
+        ).grid(row=0, column=0, padx=10, pady=(10, 5), sticky="w")
 
         # 描述
-        ctk.CTkLabel(input_frame, text="输入岗位描述，AI将自动分析并生成结构化报告", font=ctk.CTkFont(size=12),
-                     text_color=("gray50", "gray60")).grid(
-            row=1, column=0, padx=10, pady=(0, 10), sticky="w"
-        )
+        ctk.CTkLabel(
+            input_frame,
+            text="输入岗位描述，AI将自动分析并生成结构化报告",
+            font=ctk.CTkFont(size=12),
+            text_color=("gray50", "gray60"),
+        ).grid(row=1, column=0, padx=10, pady=(0, 10), sticky="w")
 
         # 公司调研选择
         ctk.CTkLabel(input_frame, text="参考公司调研（可选）:").grid(
@@ -205,10 +245,18 @@ class MainWindow(ctk.CTk):
         btn_frame.grid(row=5, column=0, padx=10, pady=10, sticky="ew")
         btn_frame.grid_columnconfigure(0, weight=1)
 
-        self.clear_btn = ctk.CTkButton(btn_frame, text="清空", width=80, fg_color="gray", command=self._on_clear_input)
+        self.clear_btn = ctk.CTkButton(
+            btn_frame,
+            text="清空",
+            width=80,
+            fg_color="gray",
+            command=self._on_clear_input,
+        )
         self.clear_btn.grid(row=0, column=0, padx=5, sticky="w")
 
-        self.analyze_btn = ctk.CTkButton(btn_frame, text="开始分析", width=150, command=self._on_analyze)
+        self.analyze_btn = ctk.CTkButton(
+            btn_frame, text="开始分析", width=150, command=self._on_analyze
+        )
         self.analyze_btn.grid(row=0, column=1, padx=5, sticky="e")
 
     def _build_output_panel(self, parent):
@@ -223,7 +271,9 @@ class MainWindow(ctk.CTk):
         header_frame.grid(row=0, column=0, padx=10, pady=(10, 5), sticky="ew")
         header_frame.grid_columnconfigure(0, weight=1)
 
-        ctk.CTkLabel(header_frame, text="分析结果", font=ctk.CTkFont(size=14, weight="bold")).pack(side="left")
+        ctk.CTkLabel(
+            header_frame, text="分析结果", font=ctk.CTkFont(size=14, weight="bold")
+        ).pack(side="left")
 
         # 按钮区
         btn_frame = ctk.CTkFrame(header_frame, fg_color="transparent")
@@ -231,27 +281,31 @@ class MainWindow(ctk.CTk):
 
         # 复制全部按钮
         self.copy_all_btn = ctk.CTkButton(
-            btn_frame, text="复制全部", width=80, height=28,
-            command=self._on_copy_all
+            btn_frame, text="复制全部", width=80, height=28, command=self._on_copy_all
         )
         self.copy_all_btn.pack(side="right", padx=5)
 
         # 清空按钮
         self.clear_result_btn = ctk.CTkButton(
-            btn_frame, text="清空", width=60, height=28,
-            fg_color="gray", command=self._on_clear_result
+            btn_frame,
+            text="清空",
+            width=60,
+            height=28,
+            fg_color="gray",
+            command=self._on_clear_result,
         )
         self.clear_result_btn.pack(side="right", padx=5)
 
         # 历史按钮
         self.history_btn = ctk.CTkButton(
-            btn_frame, text="历史", width=60, height=28,
-            command=self._on_history_click
+            btn_frame, text="历史", width=60, height=28, command=self._on_history_click
         )
         self.history_btn.pack(side="right", padx=5)
 
         # HTML渲染器
-        self.html_renderer = HtmlRenderer(output_frame, theme=self.config_manager.config.theme)
+        self.html_renderer = HtmlRenderer(
+            output_frame, theme=self.config_manager.config.theme
+        )
         self.html_renderer.grid(row=1, column=0, padx=10, pady=(5, 10), sticky="nsew")
 
         # 历史面板（延迟创建）
@@ -278,7 +332,7 @@ class MainWindow(ctk.CTk):
             self.history_panel = HistoryPanel(
                 parent,
                 history_manager=self.job_history_manager,
-                on_load_record=self._on_load_history
+                on_load_record=self._on_load_history,
             )
         else:
             self.history_panel.refresh()
@@ -325,10 +379,14 @@ class MainWindow(ctk.CTk):
         tavily_key = self.tavily_key_entry.get().strip()
 
         if url and not validate_url(url):
-            messagebox.showwarning("提示", "API 地址格式不正确，请输入以 http:// 或 https:// 开头的地址")
+            messagebox.showwarning(
+                "提示", "API 地址格式不正确，请输入以 http:// 或 https:// 开头的地址"
+            )
             return
 
-        self.config_manager.update(api_base_url=url, api_key=key, model_name=model, tavily_api_key=tavily_key)
+        self.config_manager.update(
+            api_base_url=url, api_key=key, model_name=model, tavily_api_key=tavily_key
+        )
         if self.config_manager.save_config():
             self._set_status("配置已保存")
             messagebox.showinfo("成功", "配置已保存")
@@ -436,25 +494,32 @@ class MainWindow(ctk.CTk):
         self._analysis_thread = threading.Thread(
             target=self._do_analysis,
             args=(url, key, model, jd_text, company_context),
-            daemon=True
+            daemon=True,
         )
         self._analysis_thread.start()
 
-    def _do_analysis(self, url: str, key: str, model: str, jd_text: str, company_context: str = ""):
+    def _do_analysis(
+        self, url: str, key: str, model: str, jd_text: str, company_context: str = ""
+    ):
         """后台分析任务（在子线程中运行）"""
         try:
             client = LLMClient(
                 api_base_url=url,
                 api_key=key,
                 model_name=model,
-                timeout=self.config_manager.config.timeout
+                timeout=self.config_manager.config.timeout,
             )
 
             if self.config_manager.config.stream_mode:
+                chunks = []
                 for chunk in client.analyze_jd_stream(jd_text, company_context):
                     if self._stop_flag:
                         break
+                    chunks.append(chunk)
                     self.after(0, self._update_html_display, chunk)
+                if not self._stop_flag:
+                    self._raw_result = "".join(chunks)
+                    self._raw_result_chunks = chunks
             else:
                 result = client.analyze_jd(jd_text, company_context)
                 if not self._stop_flag:
@@ -469,6 +534,7 @@ class MainWindow(ctk.CTk):
             self.after(0, self._on_analysis_complete, str(e))
         except Exception as e:
             import traceback
+
             error_detail = f"未知错误: {str(e)}\n{traceback.format_exc()}"
             self.after(0, self._on_analysis_complete, error_detail)
 
@@ -516,7 +582,7 @@ class MainWindow(ctk.CTk):
         if self._analysis_thread and self._analysis_thread.is_alive():
             self._analysis_thread.join(timeout=3.0)
 
-        if hasattr(self, 'html_renderer'):
+        if hasattr(self, "html_renderer"):
             self.html_renderer.clear()
 
         self.destroy()
@@ -550,18 +616,35 @@ class MainWindow(ctk.CTk):
         key = self.key_entry.get().strip()
         model = self.model_entry.get().strip() or "deepseek-chat"
 
-        # 启动后台线程进行匹配
-        match_thread = threading.Thread(
+        if not url:
+            messagebox.showwarning("提示", "请先填写 API 地址")
+            self.resume_match_widget.set_matching(False)
+            return
+        if not key:
+            messagebox.showwarning("提示", "请先填写 API Key")
+            self.resume_match_widget.set_matching(False)
+            return
+
+        if self._resume_match_thread and self._resume_match_thread.is_alive():
+            messagebox.showwarning("提示", "上一次匹配仍在进行中，请稍候")
+            self.resume_match_widget.set_matching(False)
+            return
+
+        self._resume_match_thread = threading.Thread(
             target=self._do_resume_match,
             args=(url, key, model, job_desc, resume),
-            daemon=True
+            daemon=True,
         )
-        match_thread.start()
+        self._resume_match_thread.start()
 
-    def _do_resume_match(self, url: str, key: str, model: str, job_desc: str, resume: str):
+    def _do_resume_match(
+        self, url: str, key: str, model: str, job_desc: str, resume: str
+    ):
         """后台简历匹配任务"""
         try:
-            client = LLMClient(api_base_url=url, api_key=key, model_name=model, timeout=60)
+            client = LLMClient(
+                api_base_url=url, api_key=key, model_name=model, timeout=60
+            )
 
             # 构建提示词
             prompt = RESUME_MATCH_PROMPT.format(job_description=job_desc, resume=resume)
@@ -572,10 +655,18 @@ class MainWindow(ctk.CTk):
                 result_chunks.append(chunk)
                 self.after(0, self.resume_match_widget.append_result, chunk)
 
-            # 完成后更新HTML显示
             self.after(0, self.resume_match_widget.finish_stream)
 
             self.after(0, self.resume_match_widget.enable_match_button)
+
+            result_text = "".join(result_chunks)
+            if result_text:
+                self.resume_history_manager.save_record(
+                    jd_text="[简历匹配]\n岗位: {}...\n简历: {}...".format(
+                        job_desc[:100], resume[:100]
+                    ),
+                    result=result_text,
+                )
         except Exception as e:
             self.after(0, self.resume_match_widget.append_result, f"\n\n错误: {str(e)}")
             self.after(0, self.resume_match_widget.finish_stream)
@@ -595,8 +686,13 @@ class MainWindow(ctk.CTk):
     def _update_resume_job_list(self):
         records = self.job_history_manager.get_all()
         if records:
-            job_list = [f"{r.title[:30]}..." if len(r.title) > 30 else r.title for r in records]
-            job_data_map = {(f"{r.title[:30]}..." if len(r.title) > 30 else r.title): r.jd_text for r in records}
+            job_list = [
+                f"{r.title[:30]}..." if len(r.title) > 30 else r.title for r in records
+            ]
+            job_data_map = {
+                (f"{r.title[:30]}..." if len(r.title) > 30 else r.title): r.jd_text
+                for r in records
+            }
             self.resume_match_widget.update_job_list(job_list, job_data_map)
 
     def _on_company_research(self, company_name: str):
@@ -616,18 +712,29 @@ class MainWindow(ctk.CTk):
             self.company_research_widget.set_researching(False)
             return
 
-        research_thread = threading.Thread(
+        if self._company_research_thread and self._company_research_thread.is_alive():
+            messagebox.showwarning("提示", "上一次调研仍在进行中，请稍候")
+            self.company_research_widget.set_researching(False)
+            return
+
+        self._company_research_thread = threading.Thread(
             target=self._do_company_research,
             args=(url, key, model, tavily_key, company_name),
-            daemon=True
+            daemon=True,
         )
-        research_thread.start()
+        self._company_research_thread.start()
 
-    def _do_company_research(self, url: str, key: str, model: str, tavily_key: str, company_name: str):
+    def _do_company_research(
+        self, url: str, key: str, model: str, tavily_key: str, company_name: str
+    ):
         """后台公司调研任务"""
         try:
-            llm_client = LLMClient(api_base_url=url, api_key=key, model_name=model, timeout=120)
-            research_client = CompanyResearchClient(tavily_api_key=tavily_key, llm_client=llm_client)
+            llm_client = LLMClient(
+                api_base_url=url, api_key=key, model_name=model, timeout=120
+            )
+            research_client = CompanyResearchClient(
+                tavily_api_key=tavily_key, llm_client=llm_client
+            )
 
             for chunk in research_client.research(company_name):
                 self.after(0, self.company_research_widget.append_result, chunk)
@@ -638,7 +745,9 @@ class MainWindow(ctk.CTk):
             self.after(0, self._on_company_research_complete, company_name, None)
 
         except Exception as e:
-            self.after(0, self.company_research_widget.append_result, f"\n\n错误: {str(e)}")
+            self.after(
+                0, self.company_research_widget.append_result, f"\n\n错误: {str(e)}"
+            )
             self.after(0, self.company_research_widget.finish_stream)
             self.after(0, self._on_company_research_complete, company_name, str(e))
 
@@ -653,8 +762,7 @@ class MainWindow(ctk.CTk):
             result = self.company_research_widget.get_result()
             if result:
                 self.company_history_manager.save_record(
-                    jd_text="[公司调研] {}".format(company_name),
-                    result=result
+                    jd_text="[公司调研] {}".format(company_name), result=result
                 )
                 self.company_research_widget.refresh_history()
                 self._update_company_list()
