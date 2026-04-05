@@ -10,8 +10,59 @@ from tkinterweb import HtmlFrame
 from ..utils.html_sanitizer import HtmlSanitizer
 from .themes import DARK_CSS, LIGHT_CSS
 
-LOADING_ANIMATION_HTML = """
-<div class="loading-container">
+LOADING_VARIANTS = {
+    "job_analysis": {
+        "title": ["AI", "正在", "分析岗位"],
+        "subtitle": "正在提炼岗位真实诉求、门槛和搜索策略",
+        "steps": [
+            "读取岗位描述",
+            "识别业务场景",
+            "拆解核心门槛",
+            "生成搜寻建议",
+        ],
+    },
+    "resume_match": {
+        "title": ["AI", "正在", "匹配简历"],
+        "subtitle": "正在比对岗位要求与候选人经历，输出推进建议",
+        "steps": [
+            "解析岗位要求",
+            "提取简历经历",
+            "评估匹配与风险",
+            "生成沟通建议",
+        ],
+    },
+    "company_research": {
+        "title": ["AI", "正在", "调研公司"],
+        "subtitle": "正在汇总公开信息、筛选来源并生成调研结论",
+        "steps": [
+            "搜索公开信息",
+            "提取网页内容",
+            "交叉整理线索",
+            "生成调研报告",
+        ],
+    },
+}
+
+
+def build_loading_animation_html(variant: str = "job_analysis") -> str:
+    """按场景生成等待动画 HTML。"""
+    config = LOADING_VARIANTS.get(variant, LOADING_VARIANTS["job_analysis"])
+    title_html = "\n".join(
+        '<span class="thinking-dot" style="animation-delay:{delay}s">{text}</span>'.format(
+            delay=index * 0.1,
+            text=text,
+        )
+        for index, text in enumerate(config["title"])
+    )
+    steps_html = "\n".join(
+        """<div class=\"step-item\" style=\"animation-delay:{delay}s\">\n"
+        "    <div class=\"step-dot\"></div>\n"
+        "    <span class=\"step-label\">{label}</span>\n"
+        "</div>""".format(delay=0.2 + index * 0.35, label=label)
+        for index, label in enumerate(config["steps"])
+    )
+
+    return """<div class="loading-container">
     <div class="pulse-ring"></div>
     <div class="pulse-ring pulse-ring-delay"></div>
     <div class="brain-icon">
@@ -20,61 +71,45 @@ LOADING_ANIMATION_HTML = """
         </svg>
     </div>
     <div class="loading-text">
-        <span class="thinking-dot">AI</span>
-        <span class="thinking-dot" style="animation-delay:0.1s">正在</span>
-        <span class="thinking-dot" style="animation-delay:0.2s">深度</span>
-        <span class="thinking-dot" style="animation-delay:0.3s">分析</span>
+        {title_html}
     </div>
+    <p class="loading-subtitle">{subtitle}</p>
     <div class="loading-steps">
-        <div class="step-item" id="step-1">
-            <div class="step-dot"></div>
-            <span class="step-label">解析岗位信息</span>
-        </div>
-        <div class="step-item" id="step-2">
-            <div class="step-dot"></div>
-            <span class="step-label">行业背景匹配</span>
-        </div>
-        <div class="step-item" id="step-3">
-            <div class="step-dot"></div>
-            <span class="step-label">提取核心门槛</span>
-        </div>
-        <div class="step-item" id="step-4">
-            <div class="step-dot"></div>
-            <span class="step-label">生成搜索策略</span>
-        </div>
+        {steps_html}
     </div>
     <div class="loading-shimmer-bar">
         <div class="shimmer-fill"></div>
     </div>
 </div>
 <style>
-    .loading-container {
+    .loading-container {{
         display: flex;
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        min-height: 400px;
-        padding: 40px 20px;
+        min-height: 360px;
+        padding: 36px 20px;
         position: relative;
-    }
-    .pulse-ring {
+        text-align: center;
+    }}
+    .pulse-ring {{
         position: absolute;
         width: 120px;
         height: 120px;
         border-radius: 50%;
-        border: 3px solid var(--pulse-color, #667eea);
+        border: 3px solid #667eea;
         animation: pulse-expand 2s ease-out infinite;
         opacity: 0;
         pointer-events: none;
-    }
-    .pulse-ring-delay {
+    }}
+    .pulse-ring-delay {{
         animation-delay: 1s;
-    }
-    @keyframes pulse-expand {
-        0% { transform: scale(0.5); opacity: 0.6; }
-        100% { transform: scale(2); opacity: 0; }
-    }
-    .brain-icon {
+    }}
+    @keyframes pulse-expand {{
+        0% {{ transform: scale(0.55); opacity: 0.55; }}
+        100% {{ transform: scale(2); opacity: 0; }}
+    }}
+    .brain-icon {{
         width: 80px;
         height: 80px;
         border-radius: 50%;
@@ -87,97 +122,108 @@ LOADING_ANIMATION_HTML = """
         box-shadow: 0 8px 32px rgba(102, 126, 234, 0.3);
         position: relative;
         z-index: 1;
-    }
-    @keyframes float-bounce {
-        0%, 100% { transform: translateY(0); }
-        50% { transform: translateY(-10px); }
-    }
-    .brain-icon svg {
+    }}
+    @keyframes float-bounce {{
+        0%, 100% {{ transform: translateY(0); }}
+        50% {{ transform: translateY(-8px); }}
+    }}
+    .brain-icon svg {{
         animation: rotate-slow 8s linear infinite;
-    }
-    @keyframes rotate-slow {
-        from { transform: rotate(0deg); }
-        to { transform: rotate(360deg); }
-    }
-    .loading-text {
-        margin-top: 28px;
+    }}
+    @keyframes rotate-slow {{
+        from {{ transform: rotate(0deg); }}
+        to {{ transform: rotate(360deg); }}
+    }}
+    .loading-text {{
+        margin-top: 24px;
         font-size: 20px;
-        font-weight: 600;
-        letter-spacing: 2px;
-    }
-    .thinking-dot {
+        font-weight: 700;
+        letter-spacing: 1px;
+        color: inherit;
+    }}
+    .loading-subtitle {{
+        max-width: 420px;
+        margin: 12px 0 0;
+        font-size: 13px;
+        line-height: 1.7;
+        color: #94a3b8;
+    }}
+    .thinking-dot {{
         display: inline-block;
         animation: fade-slide 1.8s ease-in-out infinite;
-        opacity: 0.4;
-    }
-    @keyframes fade-slide {
-        0%, 100% { opacity: 0.4; transform: translateY(0); }
-        50% { opacity: 1; transform: translateY(-2px); }
-    }
-    .loading-steps {
-        margin-top: 36px;
+        opacity: 0.45;
+        margin: 0 4px;
+    }}
+    @keyframes fade-slide {{
+        0%, 100% {{ opacity: 0.45; transform: translateY(0); }}
+        50% {{ opacity: 1; transform: translateY(-2px); }}
+    }}
+    .loading-steps {{
+        margin-top: 28px;
         display: flex;
         flex-direction: column;
         gap: 12px;
         width: 100%;
-        max-width: 260px;
-    }
-    .step-item {
+        max-width: 320px;
+        text-align: left;
+    }}
+    .step-item {{
         display: flex;
         align-items: center;
         gap: 12px;
-        animation: step-fade-in 0.5s ease forwards;
+        padding: 10px 14px;
+        border-radius: 10px;
+        background: rgba(102, 126, 234, 0.08);
+        border: 1px solid rgba(102, 126, 234, 0.12);
+        animation: step-fade-in 0.45s ease forwards;
         opacity: 0;
-    }
-    .step-item:nth-child(1) { animation-delay: 2s; }
-    .step-item:nth-child(2) { animation-delay: 8s; }
-    .step-item:nth-child(3) { animation-delay: 16s; }
-    .step-item:nth-child(4) { animation-delay: 24s; }
-    @keyframes step-fade-in {
-        to { opacity: 1; }
-    }
-    .step-dot {
+    }}
+    @keyframes step-fade-in {{
+        from {{ opacity: 0; transform: translateY(6px); }}
+        to {{ opacity: 1; transform: translateY(0); }}
+    }}
+    .step-dot {{
         width: 8px;
         height: 8px;
         border-radius: 50%;
         background: #667eea;
         flex-shrink: 0;
         animation: dot-pulse 1.5s ease-in-out infinite;
-    }
-    .step-item:nth-child(2) .step-dot { animation-delay: 0.2s; }
-    .step-item:nth-child(3) .step-dot { animation-delay: 0.4s; }
-    .step-item:nth-child(4) .step-dot { animation-delay: 0.6s; }
-    @keyframes dot-pulse {
-        0%, 100% { opacity: 0.4; transform: scale(1); }
-        50% { opacity: 1; transform: scale(1.3); }
-    }
-    .step-label {
+    }}
+    @keyframes dot-pulse {{
+        0%, 100% {{ opacity: 0.45; transform: scale(1); }}
+        50% {{ opacity: 1; transform: scale(1.25); }}
+    }}
+    .step-label {{
         font-size: 13px;
-        color: #888;
-        font-weight: 500;
-    }
-    .loading-shimmer-bar {
-        margin-top: 40px;
+        color: inherit;
+        font-weight: 600;
+    }}
+    .loading-shimmer-bar {{
+        margin-top: 28px;
         width: 100%;
         max-width: 320px;
         height: 4px;
-        background: rgba(102, 126, 234, 0.1);
+        background: rgba(102, 126, 234, 0.12);
         border-radius: 4px;
         overflow: hidden;
-    }
-    .shimmer-fill {
+    }}
+    .shimmer-fill {{
         height: 100%;
-        width: 40%;
+        width: 42%;
         background: linear-gradient(90deg, transparent, #667eea, transparent);
         border-radius: 4px;
-        animation: shimmer-slide 2s ease-in-out infinite;
-    }
-    @keyframes shimmer-slide {
-        0% { transform: translateX(-100%); }
-        100% { transform: translateX(350%); }
-    }
-</style>
-"""
+        animation: shimmer-slide 1.8s ease-in-out infinite;
+    }}
+    @keyframes shimmer-slide {{
+        0% {{ transform: translateX(-100%); }}
+        100% {{ transform: translateX(340%); }}
+    }}
+</style>""".format(
+        title_html=title_html,
+        subtitle=config["subtitle"],
+        steps_html=steps_html,
+    )
 
 
 class HtmlRenderer:
@@ -367,11 +413,13 @@ class HtmlRenderer:
         except Exception:
             self._enter_fallback_mode()
 
-    def show_loading(self):
+    def show_loading(self, variant: str = "job_analysis"):
         """显示等待动画。"""
         self._buffer = ""
         self._exit_fallback_mode()
-        self._html_frame.load_html(self._wrap_html(LOADING_ANIMATION_HTML))
+        self._html_frame.load_html(
+            self._wrap_html(build_loading_animation_html(variant))
+        )
 
     def clear(self):
         """清空内容。"""

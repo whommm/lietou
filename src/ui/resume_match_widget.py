@@ -203,7 +203,7 @@ class ResumeMatchWidget(ctk.CTkFrame):
     def show_loading(self):
         """显示加载状态。"""
         self._result_buffer = ""
-        self.html_renderer.show_loading()
+        self.html_renderer.show_loading("resume_match")
 
     def clear_result(self):
         """清空结果。"""

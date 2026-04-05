@@ -226,7 +226,7 @@ class CompanyResearchWidget(ctk.CTkFrame):
         if self._showing_history:
             self._hide_history()
         self._result_buffer = ""
-        self.html_renderer.show_loading()
+        self.html_renderer.show_loading("company_research")
 
     def clear_result(self):
         """清空结果。"""

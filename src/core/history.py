@@ -34,6 +34,20 @@ class HistoryManager:
         re.compile(r"职位[：:]\s*(.+?)(?:\n|$)"),
     ]
     HTML_TEXT_PATTERN = re.compile(r"<[^>]+>")
+    HTML_JOB_TITLE_PATTERNS = [
+        re.compile(r"<h2>[^<]*岗位名称[：:]\s*([^<]+)</h2>"),
+        re.compile(r"<p><strong>岗位名称：</strong>\s*([^<]+)</p>"),
+        re.compile(r"<p><strong>职位名称：</strong>\s*([^<]+)</p>"),
+    ]
+    TEXT_JOB_TITLE_PATTERNS = [
+        re.compile(r"【岗位名称】(.+?)(?:\n|$)"),
+        re.compile(r"岗位名称[：:]\s*(.+?)(?:\n|$)"),
+        re.compile(r"职位名称[：:]\s*(.+?)(?:\n|$)"),
+    ]
+    JOB_TITLE_NOISE_PATTERN = re.compile(
+        r"^(岗位职责|职位描述|职位亮点|岗位亮点|任职要求|岗位要求|工作职责|工作内容|公司介绍|公司简介|我们希望你|你将负责)",
+        re.IGNORECASE,
+    )
 
     def __init__(self, record_type: str = "job_analysis", max_records: int = 50):
         self.record_type = record_type
@@ -100,6 +114,67 @@ class HistoryManager:
         text = self.HTML_TEXT_PATTERN.sub(" ", text)
         return re.sub(r"\s+", " ", text).strip()
 
+    def _clean_title_candidate(self, text: str) -> str:
+        """清洗标题候选值，避免把说明性文本当作岗位名称。"""
+        if not text:
+            return ""
+
+        cleaned = self._strip_html(text)
+        cleaned = re.sub(r"^[\-•*#\s]+", "", cleaned)
+        cleaned = re.sub(r"[：:]$", "", cleaned).strip()
+
+        if not cleaned:
+            return ""
+        if self.JOB_TITLE_NOISE_PATTERN.match(cleaned):
+            return ""
+        if len(cleaned) > 60:
+            return ""
+        return cleaned
+
+    def _extract_job_title_from_jd(self, jd_text: str) -> str:
+        """优先从原始 JD 中提取岗位名称。"""
+        if not jd_text:
+            return ""
+
+        for pattern in self.TITLE_PATTERNS:
+            match = pattern.search(jd_text)
+            if match:
+                cleaned = self._clean_title_candidate(match.group(1))
+                if cleaned:
+                    return self._truncate_text(cleaned, 30)
+
+        lines = [line.strip() for line in jd_text.strip().split("\n") if line.strip()]
+        if not lines:
+            return ""
+
+        first_line = self._clean_title_candidate(lines[0])
+        if first_line and len(first_line) <= 30:
+            return first_line
+
+        return ""
+
+    def _extract_job_title_from_result(self, result: str) -> str:
+        """从分析结果中提取岗位名称，作为 JD 提取失败后的兜底。"""
+        if not result:
+            return ""
+
+        for pattern in self.HTML_JOB_TITLE_PATTERNS:
+            match = pattern.search(result)
+            if match:
+                cleaned = self._clean_title_candidate(match.group(1))
+                if cleaned:
+                    return self._truncate_text(cleaned, 30)
+
+        plain_text = self._strip_html(result)
+        for pattern in self.TEXT_JOB_TITLE_PATTERNS:
+            match = pattern.search(plain_text)
+            if match:
+                cleaned = self._clean_title_candidate(match.group(1))
+                if cleaned:
+                    return self._truncate_text(cleaned, 30)
+
+        return ""
+
     def _extract_title(self, jd_text: str, result: str = "") -> str:
         """从结果或JD文本中提取标题。"""
         if self.record_type == "company_research":
@@ -113,28 +188,20 @@ class HistoryManager:
                 return title
             return "简历匹配记录"
 
-        if result:
-            match = re.search(r"<h2>[^<]*岗位名称[：:]\s*([^<]+)</h2>", result)
-            if match:
-                return self._truncate_text(match.group(1), 30)
+        title = self._extract_job_title_from_jd(jd_text)
+        if title:
+            return title
 
-            match = re.search(r"【岗位名称】(.+?)(?:\n|$)", result)
-            if match:
-                return self._truncate_text(match.group(1), 30)
+        title = self._extract_job_title_from_result(result)
+        if title:
+            return title
 
-        if not jd_text:
-            return "未命名岗位"
-
-        for pattern in self.TITLE_PATTERNS:
-            match = pattern.search(jd_text)
-            if match:
-                return self._truncate_text(match.group(1), 20)
-
-        lines = jd_text.strip().split("\n")
-        for line in lines:
-            line = line.strip()
-            if line and len(line) > 2:
-                return self._truncate_text(line, 20)
+        if jd_text:
+            lines = jd_text.strip().split("\n")
+            for line in lines:
+                cleaned = self._clean_title_candidate(line)
+                if cleaned and len(cleaned) > 2:
+                    return self._truncate_text(cleaned, 30)
 
         return "未命名岗位"
 
