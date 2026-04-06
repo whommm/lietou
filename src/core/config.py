@@ -16,7 +16,7 @@ class AppConfig:
     model_name: str = "deepseek-chat"
     tavily_api_key: str = ""
     timeout: int = 120
-    theme: str = "dark"
+    theme: str = "light"
 
 
 class ConfigManager:

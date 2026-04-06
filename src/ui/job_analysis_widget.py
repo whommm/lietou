@@ -13,18 +13,47 @@ from .html_renderer import HtmlRenderer
 class JobAnalysisWidget(ctk.CTkFrame):
     """岗位分析页面组件。"""
 
+    PALETTE = {
+        "dark": {
+            "panel": ("#f7faff", "#0f1d31"),
+            "panel_alt": ("#ffffff", "#142640"),
+            "border": ("#c7d8ff", "#294166"),
+            "text": ("#10233f", "#f5f7ff"),
+            "muted": ("#60708c", "#92a3c7"),
+            "accent": ("#4f7cff", "#6d8cff"),
+            "accent_hover": ("#365df3", "#8f63ff"),
+            "secondary": ("#e6efff", "#17283e"),
+            "secondary_hover": ("#d3e2ff", "#243956"),
+        },
+        "light": {
+            "panel": ("#ffffff", "#ffffff"),
+            "panel_alt": ("#f7faff", "#f7faff"),
+            "border": ("#c7d8ff", "#c7d8ff"),
+            "text": ("#10233f", "#10233f"),
+            "muted": ("#60708c", "#60708c"),
+            "accent": ("#4f7cff", "#4f7cff"),
+            "accent_hover": ("#365df3", "#365df3"),
+            "secondary": ("#eef3ff", "#eef3ff"),
+            "secondary_hover": ("#dce7ff", "#dce7ff"),
+        },
+    }
+
     def __init__(
         self,
         master,
         on_analyze: Callable,
         history_manager: HistoryManager,
         company_options: List[str],
+        on_pick_company_history: Optional[Callable] = None,
+        on_history_changed: Optional[Callable] = None,
         theme: str = "light",
         **kwargs,
     ):
         super().__init__(master, **kwargs)
         self.on_analyze = on_analyze
         self.history_manager = history_manager
+        self.on_pick_company_history = on_pick_company_history
+        self.on_history_changed = on_history_changed
         self.theme = theme
 
         self.history_panel: Optional[HistoryPanel] = None
@@ -35,6 +64,7 @@ class JobAnalysisWidget(ctk.CTkFrame):
 
     def _setup_ui(self, company_options: List[str]):
         """设置 UI 布局。"""
+        self.configure(fg_color="transparent")
         self.grid_columnconfigure(0, weight=2)
         self.grid_columnconfigure(1, weight=3)
         self.grid_rowconfigure(0, weight=1)
@@ -44,7 +74,14 @@ class JobAnalysisWidget(ctk.CTkFrame):
 
     def _build_input_panel(self, company_options: List[str]):
         """构建左侧输入面板。"""
-        input_frame = ctk.CTkFrame(self)
+        colors = self.PALETTE[self.theme]
+        input_frame = ctk.CTkFrame(
+            self,
+            corner_radius=24,
+            fg_color=colors["panel"],
+            border_width=1,
+            border_color=colors["border"],
+        )
         input_frame.grid(row=0, column=0, padx=(10, 5), pady=10, sticky="nsew")
         input_frame.grid_columnconfigure(0, weight=1)
         input_frame.grid_rowconfigure(4, weight=1)
@@ -52,36 +89,81 @@ class JobAnalysisWidget(ctk.CTkFrame):
         ctk.CTkLabel(
             input_frame,
             text="原始岗位描述 (JD)",
-            font=ctk.CTkFont(size=14, weight="bold"),
-        ).grid(row=0, column=0, padx=10, pady=(10, 5), sticky="w")
+            font=ctk.CTkFont(size=18, weight="bold"),
+            text_color=colors["text"],
+        ).grid(row=0, column=0, padx=16, pady=(16, 5), sticky="w")
 
         ctk.CTkLabel(
             input_frame,
-            text="输入岗位描述，AI将自动分析并生成结构化报告",
+            text="输入岗位描述，系统会产出岗位画像、门槛拆解和搜寻建议。",
             font=ctk.CTkFont(size=12),
-            text_color=("gray50", "gray60"),
-        ).grid(row=1, column=0, padx=10, pady=(0, 10), sticky="w")
+            text_color=colors["muted"],
+        ).grid(row=1, column=0, padx=16, pady=(0, 12), sticky="w")
 
-        ctk.CTkLabel(input_frame, text="参考公司调研（可选）:").grid(
-            row=2, column=0, padx=10, pady=(5, 5), sticky="w"
+        ctk.CTkLabel(
+            input_frame, text="参考公司调研（可选）:", text_color=colors["text"]
+        ).grid(row=2, column=0, padx=16, pady=(8, 6), sticky="w")
+        picker_row = ctk.CTkFrame(input_frame, fg_color="transparent")
+        picker_row.grid(row=3, column=0, padx=16, pady=(0, 8), sticky="ew")
+        picker_row.grid_columnconfigure(0, weight=1)
+
+        self.company_combo = ctk.CTkComboBox(
+            picker_row,
+            values=company_options,
+            corner_radius=16,
+            height=38,
+            fg_color=colors["panel_alt"],
+            border_color=colors["border"],
+            button_color=colors["accent"],
+            button_hover_color=colors["accent_hover"],
+            dropdown_fg_color=colors["panel_alt"],
+            dropdown_hover_color=colors["secondary_hover"],
+            dropdown_text_color=colors["text"],
+            text_color=colors["text"],
         )
-        self.company_combo = ctk.CTkComboBox(input_frame, values=company_options)
-        self.company_combo.grid(row=3, column=0, padx=10, pady=(0, 5), sticky="ew")
+        self.company_combo.grid(row=0, column=0, sticky="ew")
+
+        self.company_picker_btn = ctk.CTkButton(
+            picker_row,
+            text="从历史选择",
+            width=112,
+            height=38,
+            corner_radius=18,
+            fg_color=colors["secondary"],
+            hover_color=colors["secondary_hover"],
+            text_color=colors["text"],
+            command=self._on_open_company_picker,
+        )
+        self.company_picker_btn.grid(row=0, column=1, padx=(10, 0), sticky="e")
         if company_options:
             self.company_combo.set(company_options[0])
 
-        self.jd_textbox = ctk.CTkTextbox(input_frame, wrap="word")
-        self.jd_textbox.grid(row=4, column=0, padx=10, pady=5, sticky="nsew")
+        self.jd_textbox = ctk.CTkTextbox(
+            input_frame,
+            wrap="word",
+            corner_radius=18,
+            border_width=1,
+            border_color=colors["border"],
+            fg_color=colors["panel_alt"],
+            text_color=colors["text"],
+            scrollbar_button_color=colors["accent"],
+            scrollbar_button_hover_color=colors["accent_hover"],
+        )
+        self.jd_textbox.grid(row=4, column=0, padx=16, pady=8, sticky="nsew")
 
         btn_frame = ctk.CTkFrame(input_frame, fg_color="transparent")
-        btn_frame.grid(row=5, column=0, padx=10, pady=10, sticky="ew")
+        btn_frame.grid(row=5, column=0, padx=16, pady=(4, 16), sticky="ew")
         btn_frame.grid_columnconfigure(0, weight=1)
 
         self.clear_input_btn = ctk.CTkButton(
             btn_frame,
             text="清空",
-            width=80,
-            fg_color="gray",
+            width=84,
+            height=38,
+            corner_radius=18,
+            fg_color=colors["secondary"],
+            hover_color=colors["secondary_hover"],
+            text_color=colors["text"],
             command=self._on_clear_input_click,
         )
         self.clear_input_btn.grid(row=0, column=0, padx=5, sticky="w")
@@ -90,13 +172,26 @@ class JobAnalysisWidget(ctk.CTkFrame):
             btn_frame,
             text="开始分析",
             width=150,
+            height=40,
+            corner_radius=20,
+            fg_color=colors["accent"],
+            hover_color=colors["accent_hover"],
+            text_color="#f8fbff",
+            font=ctk.CTkFont(size=12, weight="bold"),
             command=self._on_analyze_click,
         )
         self.analyze_btn.grid(row=0, column=1, padx=5, sticky="e")
 
     def _build_result_panel(self):
         """构建右侧结果面板。"""
-        result_frame = ctk.CTkFrame(self)
+        colors = self.PALETTE[self.theme]
+        result_frame = ctk.CTkFrame(
+            self,
+            corner_radius=24,
+            fg_color=colors["panel"],
+            border_width=1,
+            border_color=colors["border"],
+        )
         result_frame.grid(row=0, column=1, padx=(5, 10), pady=10, sticky="nsew")
         result_frame.grid_columnconfigure(0, weight=1)
         result_frame.grid_rowconfigure(1, weight=1)
@@ -108,7 +203,8 @@ class JobAnalysisWidget(ctk.CTkFrame):
         ctk.CTkLabel(
             header_frame,
             text="分析结果",
-            font=ctk.CTkFont(size=14, weight="bold"),
+            font=ctk.CTkFont(size=18, weight="bold"),
+            text_color=colors["text"],
         ).pack(side="left")
 
         btn_frame = ctk.CTkFrame(header_frame, fg_color="transparent")
@@ -118,7 +214,11 @@ class JobAnalysisWidget(ctk.CTkFrame):
             btn_frame,
             text="历史",
             width=60,
-            height=28,
+            height=32,
+            corner_radius=16,
+            fg_color=colors["secondary"],
+            hover_color=colors["secondary_hover"],
+            text_color=colors["text"],
             command=self._on_history_click,
         )
         self.history_btn.pack(side="right", padx=5)
@@ -127,7 +227,11 @@ class JobAnalysisWidget(ctk.CTkFrame):
             btn_frame,
             text="复制全部",
             width=80,
-            height=28,
+            height=32,
+            corner_radius=16,
+            fg_color=colors["secondary"],
+            hover_color=colors["secondary_hover"],
+            text_color=colors["text"],
             command=self._on_copy_all_click,
         )
         self.copy_all_btn.pack(side="right", padx=5)
@@ -136,8 +240,11 @@ class JobAnalysisWidget(ctk.CTkFrame):
             btn_frame,
             text="清空",
             width=60,
-            height=28,
-            fg_color="gray",
+            height=32,
+            corner_radius=16,
+            fg_color=colors["secondary"],
+            hover_color=colors["secondary_hover"],
+            text_color=colors["text"],
             command=self._on_clear_result_click,
         )
         self.clear_result_btn.pack(side="right", padx=5)
@@ -157,6 +264,19 @@ class JobAnalysisWidget(ctk.CTkFrame):
     def _on_clear_input_click(self):
         """清空输入。"""
         self.jd_textbox.delete("1.0", "end")
+
+    def _on_open_company_picker(self):
+        """打开公司调研历史选择器。"""
+        if self.on_pick_company_history:
+            self.on_pick_company_history()
+
+    def _on_company_record_selected(self, record):
+        """选择公司历史后更新快捷选择。"""
+        self.company_combo.set(record.title)
+
+    def set_selected_company(self, title: str):
+        """设置当前选中的公司调研项。"""
+        self.company_combo.set(title)
 
     def _on_clear_result_click(self):
         """清空结果。"""
@@ -190,6 +310,7 @@ class JobAnalysisWidget(ctk.CTkFrame):
                 self._result_parent,
                 history_manager=self.history_manager,
                 on_load_record=self._on_load_history,
+                on_history_changed=self.on_history_changed,
             )
         else:
             self.history_panel.refresh()
@@ -261,6 +382,7 @@ class JobAnalysisWidget(ctk.CTkFrame):
         if analyzing:
             self.analyze_btn.configure(state="disabled", text="AI 正在思考中...")
             self.clear_input_btn.configure(state="disabled")
+            self.company_picker_btn.configure(state="disabled")
             self.copy_all_btn.configure(state="disabled")
             self.clear_result_btn.configure(state="disabled")
             self.history_btn.configure(state="disabled")
@@ -269,6 +391,7 @@ class JobAnalysisWidget(ctk.CTkFrame):
         else:
             self.analyze_btn.configure(state="normal", text="开始分析")
             self.clear_input_btn.configure(state="normal")
+            self.company_picker_btn.configure(state="normal")
             self.copy_all_btn.configure(state="normal")
             self.clear_result_btn.configure(state="normal")
             self.history_btn.configure(state="normal")

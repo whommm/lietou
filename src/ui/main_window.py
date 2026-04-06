@@ -1,7 +1,7 @@
 """主窗口 UI 模块。"""
 
 import threading
-from tkinter import messagebox
+from tkinter import TclError, messagebox
 from typing import Optional
 
 import customtkinter as ctk
@@ -19,12 +19,32 @@ from ..core.llm_client import (
 from ..core.prompt import RESUME_MATCH_PROMPT
 from ..utils.helpers import validate_api_key, validate_url
 from .company_research_widget import CompanyResearchWidget
+from .history_picker import HistoryPickerDialog
 from .job_analysis_widget import JobAnalysisWidget
 from .resume_match_widget import ResumeMatchWidget
 
 
 class MainWindow(ctk.CTk):
     """主窗口类。"""
+
+    FIXED_THEME = "light"
+
+    MAX_COMPANY_OPTIONS = 3
+    MAX_JOB_OPTIONS = 3
+
+    SURFACE_COLORS = {
+        "app": "#edf4ff",
+        "panel": "#ffffff",
+        "panel_alt": "#f7faff",
+        "panel_soft": "#f3f7ff",
+        "panel_edge": "#d9e5ff",
+        "text": "#13233d",
+        "muted": "#64748f",
+        "accent": "#4f7cff",
+        "accent_hover": "#3f68e6",
+        "secondary": "#edf3ff",
+        "secondary_hover": "#dde8ff",
+    }
 
     def __init__(self):
         super().__init__()
@@ -38,8 +58,10 @@ class MainWindow(ctk.CTk):
         self.geometry("1300x900")
         self.minsize(1000, 700)
 
-        ctk.set_appearance_mode(self.config_manager.config.theme)
+        self.config_manager.update(theme=self.FIXED_THEME)
+        ctk.set_appearance_mode(self.FIXED_THEME)
         ctk.set_default_color_theme("blue")
+        self.configure(fg_color=self.SURFACE_COLORS["app"])
 
         self._analysis_thread: Optional[threading.Thread] = None
         self._resume_match_thread: Optional[threading.Thread] = None
@@ -65,61 +87,144 @@ class MainWindow(ctk.CTk):
 
     def _build_config_frame(self):
         """构建顶部配置区。"""
-        config_frame = ctk.CTkFrame(self)
-        config_frame.grid(row=0, column=0, padx=10, pady=(10, 5), sticky="ew")
+        colors = self.SURFACE_COLORS
+        config_frame = ctk.CTkFrame(
+            self,
+            corner_radius=24,
+            fg_color=colors["panel"],
+            border_width=1,
+            border_color=colors["panel_edge"],
+        )
+        config_frame.grid(row=0, column=0, padx=14, pady=(14, 6), sticky="ew")
         config_frame.grid_columnconfigure(1, weight=1)
         config_frame.grid_columnconfigure(3, weight=1)
+        config_frame.grid_columnconfigure(8, weight=1)
+
+        title_frame = ctk.CTkFrame(config_frame, fg_color="transparent")
+        title_frame.grid(
+            row=0, column=0, columnspan=2, padx=(16, 10), pady=(14, 4), sticky="w"
+        )
+        ctk.CTkLabel(
+            title_frame,
+            text="智能岗位分析工作台",
+            font=ctk.CTkFont(size=20, weight="bold"),
+            text_color=colors["text"],
+        ).pack(anchor="w")
+        ctk.CTkLabel(
+            title_frame,
+            text="统一管理模型配置、公司调研、岗位分析与简历匹配。",
+            font=ctk.CTkFont(size=12),
+            text_color=colors["muted"],
+        ).pack(anchor="w", pady=(2, 0))
+
+        badge = ctk.CTkLabel(
+            config_frame,
+            text="Light Workspace",
+            corner_radius=999,
+            padx=14,
+            pady=7,
+            fg_color=colors["secondary"],
+            text_color=colors["text"],
+            font=ctk.CTkFont(size=11, weight="bold"),
+        )
+        badge.grid(row=0, column=8, padx=(10, 16), pady=(16, 6), sticky="e")
 
         ctk.CTkLabel(config_frame, text="API 地址:").grid(
-            row=0, column=0, padx=(10, 5), pady=10, sticky="w"
+            row=1, column=0, padx=(16, 5), pady=10, sticky="w"
         )
         self.url_entry = ctk.CTkEntry(
-            config_frame, placeholder_text="https://api.deepseek.com/v1"
+            config_frame,
+            placeholder_text="https://api.deepseek.com/v1",
+            corner_radius=16,
+            height=36,
+            fg_color=colors["panel_alt"],
+            border_color=colors["panel_edge"],
+            text_color=colors["text"],
         )
-        self.url_entry.grid(row=0, column=1, padx=5, pady=10, sticky="ew")
+        self.url_entry.grid(row=1, column=1, padx=5, pady=10, sticky="ew")
 
         ctk.CTkLabel(config_frame, text="API Key:").grid(
-            row=0, column=2, padx=(20, 5), pady=10, sticky="w"
+            row=1, column=2, padx=(20, 5), pady=10, sticky="w"
         )
         self.key_entry = ctk.CTkEntry(
-            config_frame, placeholder_text="sk-xxx...", show="*"
+            config_frame,
+            placeholder_text="sk-xxx...",
+            show="*",
+            corner_radius=16,
+            height=36,
+            fg_color=colors["panel_alt"],
+            border_color=colors["panel_edge"],
+            text_color=colors["text"],
         )
-        self.key_entry.grid(row=0, column=3, padx=5, pady=10, sticky="ew")
+        self.key_entry.grid(row=1, column=3, padx=5, pady=10, sticky="ew")
 
         ctk.CTkLabel(config_frame, text="模型:").grid(
-            row=0, column=4, padx=(20, 5), pady=10, sticky="w"
+            row=1, column=4, padx=(20, 5), pady=10, sticky="w"
         )
         self.model_entry = ctk.CTkEntry(
-            config_frame, placeholder_text="deepseek-chat", width=220
+            config_frame,
+            placeholder_text="deepseek-chat",
+            width=220,
+            corner_radius=16,
+            height=36,
+            fg_color=colors["panel_alt"],
+            border_color=colors["panel_edge"],
+            text_color=colors["text"],
         )
-        self.model_entry.grid(row=0, column=5, padx=5, pady=10)
+        self.model_entry.grid(row=1, column=5, padx=5, pady=10)
 
         self.save_btn = ctk.CTkButton(
-            config_frame, text="保存配置", width=100, command=self._on_save_config
+            config_frame,
+            text="保存配置",
+            width=110,
+            height=38,
+            corner_radius=18,
+            fg_color=colors["accent"],
+            hover_color=colors["accent_hover"],
+            text_color="#f8fbff",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            command=self._on_save_config,
         )
-        self.save_btn.grid(row=0, column=6, padx=(20, 10), pady=10)
-
-        self.theme_switch = ctk.CTkSwitch(
-            config_frame, text="深色模式", command=self._on_theme_toggle
-        )
-        self.theme_switch.grid(row=0, column=7, padx=(10, 5), pady=10)
-        if self.config_manager.config.theme == "dark":
-            self.theme_switch.select()
+        self.save_btn.grid(row=1, column=6, padx=(20, 10), pady=10)
 
         ctk.CTkLabel(config_frame, text="Tavily Key:").grid(
-            row=1, column=0, padx=(10, 5), pady=(0, 10), sticky="w"
+            row=2, column=0, padx=(16, 5), pady=(0, 16), sticky="w"
         )
         self.tavily_key_entry = ctk.CTkEntry(
-            config_frame, placeholder_text="tvly-xxx... (用于公司调研)", show="*"
+            config_frame,
+            placeholder_text="tvly-xxx... (用于公司调研)",
+            show="*",
+            corner_radius=16,
+            height=36,
+            fg_color=colors["panel_alt"],
+            border_color=colors["panel_edge"],
+            text_color=colors["text"],
         )
         self.tavily_key_entry.grid(
-            row=1, column=1, columnspan=5, padx=5, pady=(0, 10), sticky="ew"
+            row=2, column=1, columnspan=7, padx=(5, 16), pady=(0, 16), sticky="ew"
         )
+
+        for label in config_frame.winfo_children():
+            if isinstance(label, ctk.CTkLabel) and label not in (badge,):
+                label.configure(text_color=colors["text"])
 
     def _build_main_content(self):
         """构建主内容区。"""
-        self.tabview = ctk.CTkTabview(self)
-        self.tabview.grid(row=1, column=0, padx=10, pady=5, sticky="nsew")
+        colors = self.SURFACE_COLORS
+        self.tabview = ctk.CTkTabview(
+            self,
+            corner_radius=24,
+            fg_color=colors["panel"],
+            segmented_button_fg_color=colors["secondary"],
+            segmented_button_selected_color=colors["accent"],
+            segmented_button_selected_hover_color=colors["accent_hover"],
+            segmented_button_unselected_color=colors["secondary"],
+            segmented_button_unselected_hover_color=colors["secondary_hover"],
+            text_color=colors["text"],
+            border_width=1,
+            border_color=colors["panel_edge"],
+        )
+        self.tabview.grid(row=1, column=0, padx=14, pady=6, sticky="nsew")
 
         self.tab_company = self.tabview.add("公司调研")
         self.tab_job = self.tabview.add("岗位分析")
@@ -140,7 +245,9 @@ class MainWindow(ctk.CTk):
             on_analyze=self._on_analyze,
             history_manager=self.job_history_manager,
             company_options=["不使用"],
-            theme=self.config_manager.config.theme,
+            on_pick_company_history=self._open_company_history_picker,
+            on_history_changed=self._update_company_list,
+            theme=self.FIXED_THEME,
         )
         self.job_analysis_widget.grid(
             row=0, column=0, columnspan=2, sticky="nsew", padx=5, pady=5
@@ -156,7 +263,8 @@ class MainWindow(ctk.CTk):
             self.tab_resume,
             on_match=self._on_resume_match,
             job_list=["请先分析岗位"],
-            theme=self.config_manager.config.theme,
+            on_pick_history=self._open_job_history_picker,
+            theme=self.FIXED_THEME,
         )
         self.resume_match_widget.grid(
             row=0, column=0, columnspan=2, sticky="nsew", padx=5, pady=5
@@ -172,7 +280,8 @@ class MainWindow(ctk.CTk):
             self.tab_company,
             on_research=self._on_company_research,
             history_manager=self.company_history_manager,
-            theme=self.config_manager.config.theme,
+            on_history_changed=self._update_company_list,
+            theme=self.FIXED_THEME,
         )
         self.company_research_widget.grid(
             row=0, column=0, columnspan=2, sticky="nsew", padx=5, pady=5
@@ -180,12 +289,34 @@ class MainWindow(ctk.CTk):
 
     def _build_status_bar(self):
         """构建底部状态栏。"""
-        status_frame = ctk.CTkFrame(self, height=30)
-        status_frame.grid(row=2, column=0, padx=10, pady=(5, 10), sticky="ew")
+        colors = self.SURFACE_COLORS
+        status_frame = ctk.CTkFrame(
+            self,
+            height=42,
+            corner_radius=18,
+            fg_color=colors["panel_soft"],
+            border_width=1,
+            border_color=colors["panel_edge"],
+        )
+        status_frame.grid(row=2, column=0, padx=14, pady=(6, 14), sticky="ew")
         status_frame.grid_columnconfigure(0, weight=1)
 
-        self.status_label = ctk.CTkLabel(status_frame, text="就绪", anchor="w")
+        self.status_label = ctk.CTkLabel(
+            status_frame,
+            text="就绪",
+            anchor="w",
+            text_color=colors["text"],
+            font=ctk.CTkFont(size=12, weight="bold"),
+        )
         self.status_label.grid(row=0, column=0, padx=10, pady=5, sticky="w")
+
+        self.status_hint_label = ctk.CTkLabel(
+            status_frame,
+            text="Single Light Theme Workspace",
+            text_color=colors["muted"],
+            font=ctk.CTkFont(size=11),
+        )
+        self.status_hint_label.grid(row=0, column=1, padx=10, pady=5, sticky="e")
 
     def _load_config_to_ui(self):
         """加载配置到界面。"""
@@ -224,16 +355,13 @@ class MainWindow(ctk.CTk):
         else:
             messagebox.showerror("错误", "配置保存失败")
 
-    def _on_theme_toggle(self):
-        """主题切换事件。"""
-        theme = "dark" if self.theme_switch.get() else "light"
-        ctk.set_appearance_mode(theme)
-        self.config_manager.update(theme=theme)
-        self.config_manager.save_config()
-
-        self.job_analysis_widget.set_theme(theme)
-        self.company_research_widget.set_theme(theme)
-        self.resume_match_widget.set_theme(theme)
+    def _safe_after(self, callback, *args):
+        """窗口仍存在时再派发 UI 回调，避免关闭后触发 Tcl 错误。"""
+        try:
+            if self.winfo_exists():
+                self.after(0, callback, *args)
+        except TclError:
+            return
 
     def _create_llm_client(self, url: str, key: str, model: str, timeout: int):
         """创建统一的 LLM 客户端。"""
@@ -410,14 +538,14 @@ class MainWindow(ctk.CTk):
             result = client.analyze_jd(jd_text, company_context)
             if not self._stop_event.is_set():
                 self._raw_result = result
-                self.after(0, self._on_analysis_complete, None)
+                self._safe_after(self._on_analysis_complete, None)
         except (AuthError, NetworkError, TimeoutError, LLMClientError) as e:
-            self.after(0, self._on_analysis_complete, str(e))
+            self._safe_after(self._on_analysis_complete, str(e))
         except Exception as e:
             import traceback
 
             error_detail = f"未知错误: {str(e)}\n{traceback.format_exc()}"
-            self.after(0, self._on_analysis_complete, error_detail)
+            self._safe_after(self._on_analysis_complete, error_detail)
 
     def _on_analysis_complete(self, error: Optional[str]):
         """岗位分析完成回调。"""
@@ -453,11 +581,13 @@ class MainWindow(ctk.CTk):
             client = self._create_llm_client(url, key, model, 60)
             prompt = RESUME_MATCH_PROMPT.format(job_description=job_desc, resume=resume)
             result_text = client.chat(prompt)
-            self.after(
-                0, self._on_resume_match_complete, result_text, job_desc, resume, None
+            self._safe_after(
+                self._on_resume_match_complete, result_text, job_desc, resume, None
             )
         except Exception as e:
-            self.after(0, self._on_resume_match_complete, "", job_desc, resume, str(e))
+            self._safe_after(
+                self._on_resume_match_complete, "", job_desc, resume, str(e)
+            )
 
     def _on_resume_match_complete(
         self, result_text: str, job_desc: str, resume: str, error: Optional[str]
@@ -497,11 +627,13 @@ class MainWindow(ctk.CTk):
                 tavily_api_key=tavily_key, llm_client=llm_client
             )
             result = research_client.research(company_name)
-            self.after(
-                0, self._on_company_research_complete, company_name, None, result
+            self._safe_after(
+                self._on_company_research_complete, company_name, None, result
             )
         except Exception as e:
-            self.after(0, self._on_company_research_complete, company_name, str(e), "")
+            self._safe_after(
+                self._on_company_research_complete, company_name, str(e), ""
+            )
 
     def _on_company_research_complete(
         self, company_name: str, error: Optional[str], result: str = ""
@@ -512,26 +644,104 @@ class MainWindow(ctk.CTk):
     def _update_company_list(self):
         """更新岗位分析的公司调研列表。"""
         records = self.company_history_manager.get_all()
-        if records:
-            company_list = ["不使用"] + [r.title for r in records]
-        else:
-            company_list = ["不使用"]
+        company_titles = []
+        seen_titles = set()
+
+        for record in records:
+            title = record.title.strip()
+            if not title or title in seen_titles:
+                continue
+            seen_titles.add(title)
+            company_titles.append(title)
+            if len(company_titles) >= self.MAX_COMPANY_OPTIONS:
+                break
+
+        company_list = ["不使用"] + company_titles
         self.job_analysis_widget.update_company_options(company_list)
+
+    def _make_job_option_label(self, record, index: int) -> str:
+        """为岗位下拉框生成稳定且不易冲突的展示文案。"""
+        base_title = (
+            record.title[:30] + "..." if len(record.title) > 30 else record.title
+        )
+        time_suffix = record.created_at[5:16] if record.created_at else str(index + 1)
+        return "{}  [{}]".format(base_title, time_suffix)
 
     def _update_resume_job_list(self):
         """更新简历匹配的岗位列表。"""
         records = self.job_history_manager.get_all()
         if not records:
+            self.resume_match_widget.update_job_list(["请先分析岗位"], {})
             return
 
-        job_list = [
-            f"{r.title[:30]}..." if len(r.title) > 30 else r.title for r in records
-        ]
-        job_data_map = {
-            (f"{r.title[:30]}..." if len(r.title) > 30 else r.title): r.jd_text
-            for r in records
-        }
+        recent_records = records[: self.MAX_JOB_OPTIONS]
+        job_list = []
+        job_data_map = {}
+        for index, record in enumerate(recent_records):
+            label = self._make_job_option_label(record, index)
+            job_list.append(label)
+            job_data_map[label] = record.jd_text
+
         self.resume_match_widget.update_job_list(job_list, job_data_map)
+
+    def _open_job_history_picker(self):
+        """打开岗位分析历史选择器。"""
+        dialog = HistoryPickerDialog(
+            self,
+            title="选择岗位分析历史",
+            records=self.job_history_manager.get_all(),
+            on_select=self._on_job_history_selected,
+            empty_text="暂无岗位分析历史，可先去岗位分析页生成记录。",
+            theme=self.FIXED_THEME,
+        )
+        dialog.focus()
+
+    def _open_company_history_picker(self):
+        """打开公司调研历史选择器。"""
+        dialog = HistoryPickerDialog(
+            self,
+            title="选择公司调研历史",
+            records=self.company_history_manager.get_all(),
+            on_select=self._on_company_history_selected,
+            empty_text="暂无公司调研历史，可先去公司调研页生成记录。",
+            theme=self.FIXED_THEME,
+        )
+        dialog.focus()
+
+    def _on_company_history_selected(self, record):
+        """从历史选择公司调研后，更新岗位分析快捷选择。"""
+        current_values = [
+            item
+            for item in self.job_analysis_widget.company_combo.cget("values")
+            if item != "不使用"
+        ]
+        values = [record.title] + [
+            item for item in current_values if item != record.title
+        ]
+        values = ["不使用"] + values[: self.MAX_COMPANY_OPTIONS]
+        self.job_analysis_widget.update_company_options(values)
+        self.job_analysis_widget.set_selected_company(record.title)
+
+    def _on_job_history_selected(self, record):
+        """从历史选择岗位后，更新简历匹配快捷选择。"""
+        label = self._make_job_option_label(record, 0)
+        current_values = [
+            item for item in self.resume_match_widget.job_list if item != "请先分析岗位"
+        ]
+        current_map = dict(self.resume_match_widget.job_data_map)
+
+        if label not in current_map:
+            current_values = [label] + [
+                item for item in current_values if item != label
+            ]
+        current_map[label] = record.jd_text
+
+        values = current_values[: self.MAX_JOB_OPTIONS] or ["请先分析岗位"]
+        filtered_map = {
+            item: current_map[item] for item in values if item in current_map
+        }
+        self.resume_match_widget.update_job_list(values, filtered_map)
+        self.resume_match_widget.job_combo.set(label)
 
     def _set_status(self, text: str):
         """设置状态栏文本。"""

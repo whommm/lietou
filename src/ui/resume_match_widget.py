@@ -2,7 +2,7 @@
 
 import customtkinter as ctk
 from tkinter import messagebox
-from typing import Callable, Dict
+from typing import Callable, Dict, Optional
 
 from .html_renderer import HtmlRenderer
 from ..utils.helpers import copy_to_clipboard
@@ -11,11 +11,43 @@ from ..utils.helpers import copy_to_clipboard
 class ResumeMatchWidget(ctk.CTkFrame):
     """简历匹配界面组件"""
 
+    PALETTE = {
+        "dark": {
+            "panel": ("#f7faff", "#0f1d31"),
+            "panel_alt": ("#ffffff", "#142640"),
+            "border": ("#c7d8ff", "#294166"),
+            "text": ("#10233f", "#f5f7ff"),
+            "muted": ("#60708c", "#92a3c7"),
+            "accent": ("#4f7cff", "#6d8cff"),
+            "accent_hover": ("#365df3", "#8f63ff"),
+            "secondary": ("#e6efff", "#17283e"),
+            "secondary_hover": ("#d3e2ff", "#243956"),
+        },
+        "light": {
+            "panel": ("#ffffff", "#ffffff"),
+            "panel_alt": ("#f7faff", "#f7faff"),
+            "border": ("#c7d8ff", "#c7d8ff"),
+            "text": ("#10233f", "#10233f"),
+            "muted": ("#60708c", "#60708c"),
+            "accent": ("#4f7cff", "#4f7cff"),
+            "accent_hover": ("#365df3", "#365df3"),
+            "secondary": ("#eef3ff", "#eef3ff"),
+            "secondary_hover": ("#dce7ff", "#dce7ff"),
+        },
+    }
+
     def __init__(
-        self, master, on_match: Callable, job_list: list, theme: str = "light", **kwargs
+        self,
+        master,
+        on_match: Callable,
+        job_list: list,
+        on_pick_history: Optional[Callable] = None,
+        theme: str = "light",
+        **kwargs,
     ):
         super().__init__(master, **kwargs)
         self.on_match = on_match
+        self.on_pick_history = on_pick_history
         self.job_list = job_list
         self.job_data_map: Dict[str, str] = {}
         self.theme = theme
@@ -24,6 +56,7 @@ class ResumeMatchWidget(ctk.CTkFrame):
 
     def _setup_ui(self):
         """设置UI布局 - 左右分栏"""
+        self.configure(fg_color="transparent")
         self.grid_columnconfigure(0, weight=2)
         self.grid_columnconfigure(1, weight=3)
         self.grid_rowconfigure(0, weight=1)
@@ -33,62 +66,131 @@ class ResumeMatchWidget(ctk.CTkFrame):
 
     def _build_input_panel(self):
         """构建左侧输入面板"""
-        input_frame = ctk.CTkFrame(self)
+        colors = self.PALETTE[self.theme]
+        input_frame = ctk.CTkFrame(
+            self,
+            corner_radius=24,
+            fg_color=colors["panel"],
+            border_width=1,
+            border_color=colors["border"],
+        )
         input_frame.grid(row=0, column=0, padx=(10, 5), pady=10, sticky="nsew")
         input_frame.grid_columnconfigure(0, weight=1)
         input_frame.grid_rowconfigure(5, weight=1)
 
         # 标题
         title_label = ctk.CTkLabel(
-            input_frame, text="简历匹配分析", font=ctk.CTkFont(size=16, weight="bold")
+            input_frame,
+            text="简历匹配分析",
+            font=ctk.CTkFont(size=18, weight="bold"),
+            text_color=colors["text"],
         )
-        title_label.grid(row=0, column=0, padx=10, pady=(10, 5), sticky="w")
+        title_label.grid(row=0, column=0, padx=16, pady=(16, 5), sticky="w")
 
         # 描述
         desc_label = ctk.CTkLabel(
             input_frame,
-            text="选择已分析的岗位，输入候选人简历进行匹配分析",
+            text="选择岗位后输入候选人简历，系统会产出推进结论与验证问题。",
             font=ctk.CTkFont(size=12),
-            text_color=("gray50", "gray60"),
+            text_color=colors["muted"],
         )
-        desc_label.grid(row=1, column=0, padx=10, pady=(0, 10), sticky="w")
+        desc_label.grid(row=1, column=0, padx=16, pady=(0, 12), sticky="w")
 
         # 岗位选择
-        ctk.CTkLabel(input_frame, text="选择岗位:").grid(
-            row=2, column=0, padx=10, pady=(10, 5), sticky="w"
+        ctk.CTkLabel(input_frame, text="选择岗位:", text_color=colors["text"]).grid(
+            row=2, column=0, padx=16, pady=(10, 6), sticky="w"
         )
-        self.job_combo = ctk.CTkComboBox(input_frame, values=self.job_list)
-        self.job_combo.grid(row=3, column=0, padx=10, pady=(0, 10), sticky="ew")
+        picker_row = ctk.CTkFrame(input_frame, fg_color="transparent")
+        picker_row.grid(row=3, column=0, padx=16, pady=(0, 10), sticky="ew")
+        picker_row.grid_columnconfigure(0, weight=1)
+
+        self.job_combo = ctk.CTkComboBox(
+            picker_row,
+            values=self.job_list,
+            corner_radius=16,
+            height=38,
+            fg_color=colors["panel_alt"],
+            border_color=colors["border"],
+            button_color=colors["accent"],
+            button_hover_color=colors["accent_hover"],
+            dropdown_fg_color=colors["panel_alt"],
+            dropdown_hover_color=colors["secondary_hover"],
+            dropdown_text_color=colors["text"],
+            text_color=colors["text"],
+        )
+        self.job_combo.grid(row=0, column=0, sticky="ew")
+
+        self.job_picker_btn = ctk.CTkButton(
+            picker_row,
+            text="从历史选择",
+            width=112,
+            height=38,
+            corner_radius=18,
+            fg_color=colors["secondary"],
+            hover_color=colors["secondary_hover"],
+            text_color=colors["text"],
+            command=self._on_open_job_picker,
+        )
+        self.job_picker_btn.grid(row=0, column=1, padx=(10, 0), sticky="e")
 
         # 简历输入
-        ctk.CTkLabel(input_frame, text="候选人简历:").grid(
-            row=4, column=0, padx=10, pady=(10, 5), sticky="w"
+        ctk.CTkLabel(input_frame, text="候选人简历:", text_color=colors["text"]).grid(
+            row=4, column=0, padx=16, pady=(10, 6), sticky="w"
         )
-        self.resume_text = ctk.CTkTextbox(input_frame, wrap="word")
-        self.resume_text.grid(row=5, column=0, padx=10, pady=(0, 10), sticky="nsew")
+        self.resume_text = ctk.CTkTextbox(
+            input_frame,
+            wrap="word",
+            corner_radius=18,
+            border_width=1,
+            border_color=colors["border"],
+            fg_color=colors["panel_alt"],
+            text_color=colors["text"],
+            scrollbar_button_color=colors["accent"],
+            scrollbar_button_hover_color=colors["accent_hover"],
+        )
+        self.resume_text.grid(row=5, column=0, padx=16, pady=(0, 10), sticky="nsew")
 
         # 按钮区
         btn_frame = ctk.CTkFrame(input_frame, fg_color="transparent")
-        btn_frame.grid(row=6, column=0, padx=10, pady=(0, 10), sticky="ew")
+        btn_frame.grid(row=6, column=0, padx=16, pady=(0, 16), sticky="ew")
         btn_frame.grid_columnconfigure(0, weight=1)
 
         self.clear_btn = ctk.CTkButton(
             btn_frame,
             text="清空",
             width=60,
-            fg_color="gray",
+            height=38,
+            corner_radius=18,
+            fg_color=colors["secondary"],
+            hover_color=colors["secondary_hover"],
+            text_color=colors["text"],
             command=self._on_clear_click,
         )
         self.clear_btn.grid(row=0, column=0, padx=5, sticky="w")
 
         self.match_btn = ctk.CTkButton(
-            btn_frame, text="开始匹配分析", command=self._on_match_click
+            btn_frame,
+            text="开始匹配分析",
+            height=40,
+            corner_radius=20,
+            fg_color=colors["accent"],
+            hover_color=colors["accent_hover"],
+            text_color="#f8fbff",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            command=self._on_match_click,
         )
         self.match_btn.grid(row=0, column=1, padx=5, sticky="e")
 
     def _build_result_panel(self):
         """构建右侧结果面板"""
-        result_frame = ctk.CTkFrame(self)
+        colors = self.PALETTE[self.theme]
+        result_frame = ctk.CTkFrame(
+            self,
+            corner_radius=24,
+            fg_color=colors["panel"],
+            border_width=1,
+            border_color=colors["border"],
+        )
         result_frame.grid(row=0, column=1, padx=(5, 10), pady=10, sticky="nsew")
         result_frame.grid_columnconfigure(0, weight=1)
         result_frame.grid_rowconfigure(1, weight=1)
@@ -99,7 +201,10 @@ class ResumeMatchWidget(ctk.CTkFrame):
         header_frame.grid_columnconfigure(0, weight=1)
 
         ctk.CTkLabel(
-            header_frame, text="匹配结果", font=ctk.CTkFont(size=14, weight="bold")
+            header_frame,
+            text="匹配结果",
+            font=ctk.CTkFont(size=18, weight="bold"),
+            text_color=colors["text"],
         ).pack(side="left")
 
         # 按钮区
@@ -110,7 +215,11 @@ class ResumeMatchWidget(ctk.CTkFrame):
             btn_frame,
             text="复制全部",
             width=80,
-            height=28,
+            height=32,
+            corner_radius=16,
+            fg_color=colors["secondary"],
+            hover_color=colors["secondary_hover"],
+            text_color=colors["text"],
             command=self._on_copy_all_click,
         )
         self.copy_all_btn.pack(side="right", padx=5)
@@ -119,8 +228,11 @@ class ResumeMatchWidget(ctk.CTkFrame):
             btn_frame,
             text="清空",
             width=60,
-            height=28,
-            fg_color="gray",
+            height=32,
+            corner_radius=16,
+            fg_color=colors["secondary"],
+            hover_color=colors["secondary_hover"],
+            text_color=colors["text"],
             command=self._on_clear_result_click,
         )
         self.clear_result_btn.pack(side="right", padx=5)
@@ -154,6 +266,11 @@ class ResumeMatchWidget(ctk.CTkFrame):
         self.show_loading()
         self.on_match(job_desc, resume)
 
+    def _on_open_job_picker(self):
+        """打开岗位历史选择器。"""
+        if self.on_pick_history:
+            self.on_pick_history()
+
     def _on_clear_click(self):
         """清空输入"""
         self.resume_text.delete("1.0", "end")
@@ -179,6 +296,7 @@ class ResumeMatchWidget(ctk.CTkFrame):
         if matching:
             self.match_btn.configure(state="disabled", text="分析中...")
             self.clear_btn.configure(state="disabled")
+            self.job_picker_btn.configure(state="disabled")
             self.copy_all_btn.configure(state="disabled")
             self.clear_result_btn.configure(state="disabled")
             self.job_combo.configure(state="disabled")
@@ -186,6 +304,7 @@ class ResumeMatchWidget(ctk.CTkFrame):
         else:
             self.match_btn.configure(state="normal", text="开始匹配分析")
             self.clear_btn.configure(state="normal")
+            self.job_picker_btn.configure(state="normal")
             self.copy_all_btn.configure(state="normal")
             self.clear_result_btn.configure(state="normal")
             self.job_combo.configure(state="normal")
