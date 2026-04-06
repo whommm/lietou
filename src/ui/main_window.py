@@ -6,9 +6,17 @@ from typing import Optional
 
 import customtkinter as ctk
 
+from ..core.batch_match_repository import BatchMatchRepository
+from ..core.batch_match_service import BatchMatchService
+from ..core.candidate_repository import CandidateRepository
 from ..core.company_research_client import CompanyResearchClient
 from ..core.config import ConfigManager
+from ..core.database import DatabaseManager
 from ..core.history import HistoryManager
+from ..core.liepin_browser import LiepinBrowserManager
+from ..core.liepin_resume_extractor import LiepinResumeExtractor
+from ..core.liepin_search_service import LiepinSearchService
+from ..core.liepin_search_task_service import LiepinSearchTaskService
 from ..core.llm_client import (
     AuthError,
     LLMClient,
@@ -17,7 +25,11 @@ from ..core.llm_client import (
     TimeoutError,
 )
 from ..core.prompt import RESUME_MATCH_PROMPT
+from ..core.search_strategy_service import SearchStrategyService
+from ..core.search_task_repository import SearchTaskRepository
+from .batch_match_widget import BatchMatchWidget
 from ..utils.helpers import validate_api_key, validate_url
+from .candidate_library_widget import CandidateLibraryWidget
 from .company_research_widget import CompanyResearchWidget
 from .history_picker import HistoryPickerDialog
 from .job_analysis_widget import JobAnalysisWidget
@@ -53,6 +65,21 @@ class MainWindow(ctk.CTk):
         self.job_history_manager = HistoryManager(record_type="job_analysis")
         self.resume_history_manager = HistoryManager(record_type="resume_match")
         self.company_history_manager = HistoryManager(record_type="company_research")
+        self.database_manager = DatabaseManager()
+        self.search_task_repository = SearchTaskRepository(self.database_manager)
+        self.candidate_repository = CandidateRepository(self.database_manager)
+        self.batch_match_repository = BatchMatchRepository(self.database_manager)
+        self.search_strategy_service = SearchStrategyService()
+        self.liepin_browser_manager = LiepinBrowserManager(self.config_manager)
+        self.liepin_search_service = LiepinSearchService(self.liepin_browser_manager)
+        self.liepin_resume_extractor = LiepinResumeExtractor()
+        self.batch_match_service = BatchMatchService(self.batch_match_repository)
+        self.liepin_search_task_service = LiepinSearchTaskService(
+            task_repository=self.search_task_repository,
+            candidate_repository=self.candidate_repository,
+            search_service=self.liepin_search_service,
+            resume_extractor=self.liepin_resume_extractor,
+        )
 
         self.title("智能岗位分析与寻访助手")
         self.geometry("1300x900")
@@ -66,15 +93,20 @@ class MainWindow(ctk.CTk):
         self._analysis_thread: Optional[threading.Thread] = None
         self._resume_match_thread: Optional[threading.Thread] = None
         self._company_research_thread: Optional[threading.Thread] = None
+        self._candidate_search_thread: Optional[threading.Thread] = None
+        self._batch_match_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
 
         self._raw_result = ""
         self._current_jd = ""
+        self._candidate_job_map = {}
 
         self._build_ui()
         self._load_config_to_ui()
         self._update_resume_job_list()
         self._update_company_list()
+        self._update_candidate_job_list()
+        self._update_batch_job_list()
 
     def _build_ui(self):
         """构建用户界面。"""
@@ -229,10 +261,14 @@ class MainWindow(ctk.CTk):
         self.tab_company = self.tabview.add("公司调研")
         self.tab_job = self.tabview.add("岗位分析")
         self.tab_resume = self.tabview.add("简历匹配")
+        self.tab_candidates = self.tabview.add("候选人库")
+        self.tab_batch = self.tabview.add("批量匹配")
 
         self._build_company_research_tab()
         self._build_job_analysis_tab()
         self._build_resume_match_tab()
+        self._build_candidate_library_tab()
+        self._build_batch_match_tab()
 
     def _build_job_analysis_tab(self):
         """构建岗位分析标签页。"""
@@ -245,6 +281,7 @@ class MainWindow(ctk.CTk):
             on_analyze=self._on_analyze,
             history_manager=self.job_history_manager,
             company_options=["不使用"],
+            on_send_to_candidates=self._send_analysis_to_candidates,
             on_pick_company_history=self._open_company_history_picker,
             on_history_changed=self._update_company_list,
             theme=self.FIXED_THEME,
@@ -267,6 +304,41 @@ class MainWindow(ctk.CTk):
             theme=self.FIXED_THEME,
         )
         self.resume_match_widget.grid(
+            row=0, column=0, columnspan=2, sticky="nsew", padx=5, pady=5
+        )
+
+    def _build_candidate_library_tab(self):
+        """构建候选人库标签页。"""
+        self.tab_candidates.grid_columnconfigure(0, weight=2)
+        self.tab_candidates.grid_columnconfigure(1, weight=3)
+        self.tab_candidates.grid_rowconfigure(0, weight=1)
+
+        self.candidate_library_widget = CandidateLibraryWidget(
+            self.tab_candidates,
+            on_launch_browser=self._on_launch_liepin_browser,
+            on_check_login=self._on_check_liepin_login,
+            on_run_task=self._on_run_candidate_task,
+            on_export_debug=self._on_export_liepin_debug,
+            on_pick_job_history=self._open_job_history_picker,
+            theme=self.FIXED_THEME,
+        )
+        self.candidate_library_widget.grid(
+            row=0, column=0, columnspan=2, sticky="nsew", padx=5, pady=5
+        )
+
+    def _build_batch_match_tab(self):
+        """构建批量匹配标签页。"""
+        self.tab_batch.grid_columnconfigure(0, weight=2)
+        self.tab_batch.grid_columnconfigure(1, weight=3)
+        self.tab_batch.grid_rowconfigure(0, weight=1)
+
+        self.batch_match_widget = BatchMatchWidget(
+            self.tab_batch,
+            on_run_batch=self._on_run_batch_match,
+            on_pick_job_history=self._open_job_history_picker,
+            theme=self.FIXED_THEME,
+        )
+        self.batch_match_widget.grid(
             row=0, column=0, columnspan=2, sticky="nsew", padx=5, pady=5
         )
 
@@ -418,6 +490,19 @@ class MainWindow(ctk.CTk):
         resume_summary = resume.strip().replace("\n", " ")[:120]
         return "[简历匹配]\n岗位: {}\n简历摘要: {}".format(job_summary, resume_summary)
 
+    def _build_candidate_job_payload(self, record) -> dict:
+        """为候选人库构建岗位与搜索策略数据。"""
+        strategy = self.search_strategy_service.build_from_analysis_result(
+            record.result
+        )
+        return {
+            "record_id": record.id,
+            "title": record.title,
+            "job_description": record.jd_text,
+            "analysis_result": record.result,
+            "strategy": self.search_strategy_service.to_payload(strategy),
+        }
+
     def _run_threaded_task(self, thread_attr: str, target, args: tuple):
         """启动后台线程任务。"""
         thread = threading.Thread(target=target, args=args, daemon=True)
@@ -456,6 +541,7 @@ class MainWindow(ctk.CTk):
         if self._current_jd and self._raw_result:
             self.job_history_manager.save_record(self._current_jd, self._raw_result)
             self._update_resume_job_list()
+            self._update_candidate_job_list()
         self._set_status("岗位分析完成，结果已保存到历史记录")
 
     def _start_resume_match(self):
@@ -641,6 +727,273 @@ class MainWindow(ctk.CTk):
         """公司调研完成回调。"""
         self._finish_company_research(company_name, error, result)
 
+    def _on_launch_liepin_browser(self):
+        """启动猎聘浏览器。"""
+        try:
+            self.liepin_browser_manager.launch()
+            state = self.liepin_browser_manager.open_search_page()
+            self.candidate_library_widget.set_browser_state(
+                "浏览器已启动并打开找简历页，用户目录：{}".format(state.profile_dir)
+            )
+            self._set_status("猎聘浏览器已启动并导航到找简历页")
+        except Exception as exc:
+            messagebox.showerror("浏览器启动失败", str(exc))
+            self._set_status("猎聘浏览器启动失败")
+
+    def _on_check_liepin_login(self):
+        """检查猎聘登录状态。"""
+        try:
+            self.liepin_browser_manager.launch()
+            state = self.liepin_browser_manager.get_state()
+            text = (
+                "猎聘已登录，可手动搜索后执行结果页入库。"
+                if state.logged_in
+                else "猎聘未登录，请先在浏览器中手动登录。"
+            )
+            self.candidate_library_widget.set_browser_state(text)
+            self._set_status(text)
+        except Exception as exc:
+            messagebox.showerror("登录检查失败", str(exc))
+            self._set_status("猎聘登录检查失败")
+
+    def _on_export_liepin_debug(self):
+        """导出当前猎聘页面结构，用于真实站点选择器校准。"""
+        try:
+            self.liepin_browser_manager.launch()
+            debug_path = self.liepin_browser_manager.export_debug_snapshot(
+                "manual_debug"
+            )
+            self.candidate_library_widget.set_browser_state(
+                "已导出页面诊断文件：{}".format(debug_path)
+            )
+            self._set_status("猎聘页面诊断文件已导出")
+            messagebox.showinfo("成功", "页面诊断文件已导出:\n{}".format(debug_path))
+        except Exception as exc:
+            messagebox.showerror("导出失败", str(exc))
+            self._set_status("导出页面诊断失败")
+
+    def _send_analysis_to_candidates(self, jd_text: str, analysis_result: str):
+        """将当前岗位分析结果同步到候选人库。"""
+        target_record = None
+        for record in self.job_history_manager.get_all():
+            if record.jd_text == jd_text and record.result == analysis_result:
+                target_record = record
+                break
+
+        if (
+            target_record is None
+            and self._current_jd == jd_text
+            and self._raw_result == analysis_result
+        ):
+            target_record = self.job_history_manager.save_record(
+                jd_text, analysis_result
+            )
+            self._update_resume_job_list()
+
+        if target_record is None:
+            messagebox.showwarning("提示", "未找到对应岗位记录，请先保存分析结果后再试")
+            return
+
+        self._update_candidate_job_list(selected_record=target_record)
+        self.tabview.set("候选人库")
+        self._set_status("已将岗位分析同步到候选人库")
+
+    def _on_run_candidate_task(
+        self,
+        job_label: str,
+        payload: dict,
+        max_candidates: int,
+        max_pages: int,
+    ):
+        """创建并执行当前结果页入库任务。"""
+        if self._candidate_search_thread and self._candidate_search_thread.is_alive():
+            messagebox.showwarning("提示", "当前已有结果页入库任务在执行，请稍候")
+            self.candidate_library_widget.set_running(False)
+            return
+
+        task = self.search_task_repository.create(
+            job_history_id=payload["record_id"],
+            task_name="{} - 猎聘结果页入库".format(payload["title"]),
+            keywords=payload["strategy"],
+            max_pages=max_pages,
+            max_candidates=max_candidates,
+        )
+        self._set_status("已创建结果页入库任务，正在读取当前结果页...")
+        self._run_threaded_task(
+            "_candidate_search_thread",
+            self._do_candidate_task,
+            (task.id,),
+        )
+
+    def _do_candidate_task(self, task_id: str):
+        """后台执行当前结果页入库任务。"""
+        try:
+            summary = self.liepin_search_task_service.run_task(task_id)
+            candidates = self.candidate_repository.list_by_search_task(task_id)
+            source_map = {}
+            for candidate in candidates:
+                sources = self.candidate_repository.list_sources_for_candidate(
+                    candidate.id
+                )
+                source_map[candidate.id] = sources[0].keyword if sources else ""
+
+            candidate_payload = [
+                {
+                    "name": item.name,
+                    "current_title": item.current_title,
+                    "current_company": item.current_company,
+                    "profile_url": item.profile_url,
+                    "resume_text": item.resume_text,
+                    "keyword": source_map.get(item.id, ""),
+                }
+                for item in candidates
+            ]
+            summary_text = "结果页入库完成：来源标签 {} 个，成功入库 {} 位候选人，失败 {} 位。".format(
+                len(summary.processed_keywords),
+                summary.candidate_count,
+                len(summary.failed_candidates),
+            )
+            self._safe_after(
+                self._on_candidate_task_complete,
+                task_id,
+                candidate_payload,
+                summary_text,
+                None,
+            )
+        except Exception as exc:
+            self._safe_after(
+                self._on_candidate_task_complete,
+                task_id,
+                [],
+                "",
+                str(exc),
+            )
+
+    def _on_candidate_task_complete(
+        self,
+        task_id: str,
+        candidates: list,
+        summary_text: str,
+        error: Optional[str],
+    ):
+        """结果页入库任务完成回调。"""
+        self.candidate_library_widget.set_running(False)
+        if error:
+            messagebox.showerror("结果页入库失败", error)
+            self._set_status("结果页入库失败")
+            self.candidate_library_widget.set_task_result(
+                task_id, [], "任务失败：{}".format(error)
+            )
+            return
+
+        self.candidate_library_widget.set_task_result(task_id, candidates, summary_text)
+        self.batch_match_widget.update_candidates(candidates)
+        self._set_status("结果页入库完成")
+
+    def _on_run_batch_match(self, job_label: str, payload: dict):
+        """发起批量匹配任务。"""
+        if self._batch_match_thread and self._batch_match_thread.is_alive():
+            messagebox.showwarning("提示", "当前已有批量匹配任务在执行，请稍候")
+            self.batch_match_widget.set_running(False)
+            return
+
+        config = self._validate_llm_config()
+        if not config:
+            self.batch_match_widget.set_running(False)
+            return
+        url, key, model = config
+
+        candidates = self.candidate_library_widget.get_candidate_records()
+        if not candidates:
+            messagebox.showwarning("提示", "当前没有候选人，请先在候选人库完成采集")
+            self.batch_match_widget.set_running(False)
+            return
+
+        self._set_status("已创建批量匹配任务，正在执行...")
+        self._run_threaded_task(
+            "_batch_match_thread",
+            self._do_batch_match,
+            (url, key, model, payload, candidates),
+        )
+
+    def _do_batch_match(
+        self,
+        url: str,
+        key: str,
+        model: str,
+        payload: dict,
+        candidate_payloads: list,
+    ):
+        """后台执行批量匹配任务。"""
+        try:
+            llm_client = self._create_llm_client(url, key, model, 60)
+            service = BatchMatchService(self.batch_match_repository, llm_client)
+            candidates = []
+            for item in candidate_payloads:
+                candidate = self.candidate_repository.get_by_profile_url(
+                    item.get("profile_url", "")
+                )
+                if candidate is not None:
+                    candidates.append(candidate)
+
+            batch_job = service.create_job(
+                job_history_id=payload["record_id"],
+                candidates=candidates,
+                search_task_id=self.candidate_library_widget.task_id or None,
+            )
+            results = service.run_job(batch_job, payload["job_description"], candidates)
+
+            result_payload = []
+            for result in results:
+                candidate = self.candidate_repository.get_by_id(result.candidate_id)
+                result_payload.append(
+                    {
+                        "result_id": result.id,
+                        "candidate_id": result.candidate_id,
+                        "candidate_name": candidate.name
+                        if candidate
+                        else "未命名候选人",
+                        "score": result.score if result.score is not None else "待解析",
+                        "recommendation": result.recommendation or "待解析",
+                        "summary": result.summary or "",
+                        "risks": result.risks or "",
+                        "full_report_html": result.full_report_html,
+                    }
+                )
+            summary_text = "批量匹配完成：共处理 {} 位候选人。".format(
+                len(result_payload)
+            )
+            self._safe_after(
+                self._on_batch_match_complete,
+                result_payload,
+                summary_text,
+                None,
+            )
+        except Exception as exc:
+            self._safe_after(
+                self._on_batch_match_complete,
+                [],
+                "",
+                str(exc),
+            )
+
+    def _on_batch_match_complete(
+        self,
+        results: list,
+        summary_text: str,
+        error: Optional[str],
+    ):
+        """批量匹配完成回调。"""
+        self.batch_match_widget.set_running(False)
+        if error:
+            messagebox.showerror("批量匹配失败", error)
+            self._set_status("批量匹配失败")
+            self.batch_match_widget.set_results([], "任务失败：{}".format(error))
+            return
+
+        self.batch_match_widget.set_results(results, summary_text)
+        self._set_status("批量匹配完成")
+
     def _update_company_list(self):
         """更新岗位分析的公司调研列表。"""
         records = self.company_history_manager.get_all()
@@ -683,6 +1036,59 @@ class MainWindow(ctk.CTk):
             job_data_map[label] = record.jd_text
 
         self.resume_match_widget.update_job_list(job_list, job_data_map)
+
+    def _update_candidate_job_list(self, selected_record=None):
+        """更新候选人库的岗位来源列表。"""
+        records = self.job_history_manager.get_all()
+        if not records:
+            self._candidate_job_map = {"请先分析岗位": {}}
+            if hasattr(self, "candidate_library_widget"):
+                self.candidate_library_widget.update_job_options(
+                    ["请先分析岗位"], self._candidate_job_map
+                )
+            return
+
+        job_options = []
+        job_data_map = {}
+        for index, record in enumerate(records[: self.MAX_JOB_OPTIONS]):
+            label = self._make_job_option_label(record, index)
+            job_options.append(label)
+            job_data_map[label] = self._build_candidate_job_payload(record)
+
+        self._candidate_job_map = job_data_map
+        if hasattr(self, "candidate_library_widget"):
+            self.candidate_library_widget.update_job_options(job_options, job_data_map)
+            if selected_record is not None:
+                selected_label = None
+                for label, payload in job_data_map.items():
+                    if payload.get("record_id") == selected_record.id:
+                        selected_label = label
+                        break
+                if selected_label:
+                    self.candidate_library_widget.set_selected_job(selected_label)
+
+    def _update_batch_job_list(self, selected_record=None):
+        """更新批量匹配页的岗位列表。"""
+        records = self.job_history_manager.get_all()
+        if not records:
+            if hasattr(self, "batch_match_widget"):
+                self.batch_match_widget.update_job_options(["请先分析岗位"], {})
+            return
+
+        job_options = []
+        job_data_map = {}
+        for index, record in enumerate(records[: self.MAX_JOB_OPTIONS]):
+            label = self._make_job_option_label(record, index)
+            job_options.append(label)
+            job_data_map[label] = self._build_candidate_job_payload(record)
+
+        if hasattr(self, "batch_match_widget"):
+            self.batch_match_widget.update_job_options(job_options, job_data_map)
+            if selected_record is not None:
+                for label, payload in job_data_map.items():
+                    if payload.get("record_id") == selected_record.id:
+                        self.batch_match_widget.job_combo.set(label)
+                        break
 
     def _open_job_history_picker(self):
         """打开岗位分析历史选择器。"""
@@ -743,6 +1149,30 @@ class MainWindow(ctk.CTk):
         self.resume_match_widget.update_job_list(values, filtered_map)
         self.resume_match_widget.job_combo.set(label)
 
+        current_candidate_values = [
+            item
+            for item in self._candidate_job_map.keys()
+            if item != "请先分析岗位" and item != label
+        ]
+        candidate_payload = self._build_candidate_job_payload(record)
+        candidate_map = {label: candidate_payload}
+        for item in current_candidate_values[: self.MAX_JOB_OPTIONS - 1]:
+            if item in self._candidate_job_map:
+                candidate_map[item] = self._candidate_job_map[item]
+        self._candidate_job_map = candidate_map
+        if hasattr(self, "candidate_library_widget"):
+            self.candidate_library_widget.update_job_options(
+                list(candidate_map.keys()), candidate_map
+            )
+            self.candidate_library_widget.set_selected_job(label)
+            self.tabview.set("候选人库")
+
+        if hasattr(self, "batch_match_widget"):
+            self.batch_match_widget.update_job_options(
+                list(candidate_map.keys()), candidate_map
+            )
+            self.batch_match_widget.job_combo.set(label)
+
     def _set_status(self, text: str):
         """设置状态栏文本。"""
         self.status_label.configure(text=text)
@@ -757,6 +1187,10 @@ class MainWindow(ctk.CTk):
             self._resume_match_thread.join(timeout=3.0)
         if self._company_research_thread and self._company_research_thread.is_alive():
             self._company_research_thread.join(timeout=3.0)
+        if self._candidate_search_thread and self._candidate_search_thread.is_alive():
+            self._candidate_search_thread.join(timeout=3.0)
+        if self._batch_match_thread and self._batch_match_thread.is_alive():
+            self._batch_match_thread.join(timeout=3.0)
 
         if hasattr(self, "job_analysis_widget"):
             self.job_analysis_widget.clear_result()
@@ -764,5 +1198,10 @@ class MainWindow(ctk.CTk):
             self.resume_match_widget.clear_result()
         if hasattr(self, "company_research_widget"):
             self.company_research_widget.clear_result()
+
+        try:
+            self.liepin_browser_manager.close()
+        except Exception:
+            pass
 
         self.destroy()

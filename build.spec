@@ -36,6 +36,7 @@ a = Analysis(
         'httpx',
         'requests',
         'tiktoken',
+        'playwright',
     ],
     hookspath=[],
     hooksconfig={},
