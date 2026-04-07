@@ -21,6 +21,11 @@ class Candidate:
     resume_text: str = ""
     resume_summary: str = ""
     raw_payload_json: str = ""
+    capture_status: str = "summary_only"
+    workflow_status: str = "new"
+    notes: str = ""
+    last_source_at: str = ""
+    last_enriched_at: str = ""
     created_at: str = ""
     updated_at: str = ""
 

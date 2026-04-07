@@ -1,13 +1,13 @@
 """Persist candidates from the current Liepin result page."""
 
 from dataclasses import dataclass, field
-from typing import Iterable, List, Optional
+from typing import List
 
-from .candidate_repository import CandidateRepository
+from .candidate_excel_service import CandidateExcelService
 from .liepin_resume_extractor import LiepinResumeExtractionError, LiepinResumeExtractor
 from .liepin_search_service import LiepinSearchCandidate, LiepinSearchService
 from .search_task_repository import SearchTaskRepository
-from ..models import Candidate, SearchTask
+from ..models import SearchTask
 
 
 @dataclass
@@ -15,23 +15,28 @@ class SearchTaskExecutionSummary:
     """Execution summary for one persisted search task."""
 
     task_id: str
+    excel_path: str = ""
     processed_keywords: List[str] = field(default_factory=list)
-    candidate_count: int = 0
-    failed_candidates: List[str] = field(default_factory=list)
+    pages_processed: int = 0
+    sourced_candidate_count: int = 0
+    enriched_candidate_count: int = 0
+    partial_candidate_count: int = 0
+    failed_candidate_count: int = 0
+    failed_candidates: List[dict] = field(default_factory=list)
 
 
 class LiepinSearchTaskService:
-    """Store candidates from the current result page into the local repository."""
+    """Store candidates from the current result page into an Excel workbook."""
 
     def __init__(
         self,
         task_repository: SearchTaskRepository,
-        candidate_repository: CandidateRepository,
+        candidate_excel_service: CandidateExcelService,
         search_service: LiepinSearchService,
         resume_extractor: LiepinResumeExtractor,
     ):
         self.task_repository = task_repository
-        self.candidate_repository = candidate_repository
+        self.candidate_excel_service = candidate_excel_service
         self.search_service = search_service
         self.resume_extractor = resume_extractor
 
@@ -50,28 +55,51 @@ class LiepinSearchTaskService:
         )
 
         try:
-            candidates = self.search_service.extract_current_page_candidates()
             keyword = self._pick_source_keyword(task)
             summary.processed_keywords.append(keyword)
+            summary.excel_path = self.candidate_excel_service.create_workbook(
+                task.task_name or "候选人"
+            )
             result_page = self.search_service.ensure_result_page()
 
-            for rank_index, candidate_summary in enumerate(candidates, start=1):
-                if summary.candidate_count >= task.max_candidates:
-                    break
-                self._process_candidate(
-                    task,
-                    candidate_summary,
-                    keyword,
-                    rank_index,
-                    summary,
-                    result_page,
+            for page_number in range(1, max(1, task.max_pages) + 1):
+                self.task_repository.update_status(
+                    task.id,
+                    "running",
+                    current_step="读取第 {} 页搜索结果".format(page_number),
                 )
+                candidates = self.search_service.extract_current_page_candidates()
+                summary.pages_processed += 1
+
+                for rank_index, candidate_summary in enumerate(candidates, start=1):
+                    if summary.sourced_candidate_count >= task.max_candidates:
+                        break
+                    self._process_candidate(
+                        task,
+                        candidate_summary,
+                        keyword,
+                        page_number,
+                        rank_index,
+                        summary,
+                        result_page,
+                    )
+
+                if summary.sourced_candidate_count >= task.max_candidates:
+                    break
+                if page_number >= max(1, task.max_pages):
+                    break
+                if not self.search_service.go_to_next_result_page(result_page):
+                    break
 
             self.task_repository.update_status(
                 task.id,
                 "completed",
-                current_step="结果页入库完成，已入库 {} 位候选人".format(
-                    summary.candidate_count
+                current_step="结果页入库完成，已处理 {} 页，线索 {} 位，完整 {} 位，待补抓 {} 位，失败 {} 位".format(
+                    summary.pages_processed,
+                    summary.sourced_candidate_count,
+                    summary.enriched_candidate_count,
+                    summary.partial_candidate_count,
+                    summary.failed_candidate_count,
                 ),
                 mark_finished=True,
             )
@@ -114,10 +142,20 @@ class LiepinSearchTaskService:
         task: SearchTask,
         candidate_summary: LiepinSearchCandidate,
         keyword: str,
+        page_number: int,
         rank_index: int,
         summary: SearchTaskExecutionSummary,
         result_page,
     ) -> None:
+        row_index = self._save_candidate_summary(
+            candidate_summary,
+            keyword,
+            page_number,
+            rank_index,
+            summary,
+        )
+        summary.sourced_candidate_count += 1
+
         self.task_repository.update_status(
             task.id,
             "running",
@@ -144,19 +182,82 @@ class LiepinSearchTaskService:
             else:
                 page = browser_manager.ensure_page()
                 candidate = _extract(page)
-            saved_candidate = self.candidate_repository.upsert_candidate(candidate)
-            self.candidate_repository.add_source(
-                candidate_id=saved_candidate.id,
-                search_task_id=task.id,
-                keyword=keyword,
-                page_number=1,
-                rank_index=rank_index,
+            resume_text = (candidate.resume_text or "").strip()
+            capture_status = (
+                self.candidate_excel_service.CAPTURE_STATUS_SUCCESS
+                if resume_text
+                else self.candidate_excel_service.CAPTURE_STATUS_PARTIAL
             )
-            summary.candidate_count += 1
-        except Exception:
+            self.candidate_excel_service.update_candidate_detail(
+                summary.excel_path,
+                row_index,
+                resume_text,
+                capture_status,
+            )
+            summary.enriched_candidate_count += 1
+            if capture_status == self.candidate_excel_service.CAPTURE_STATUS_PARTIAL:
+                summary.partial_candidate_count += 1
+        except Exception as exc:
+            self.candidate_excel_service.update_candidate_detail(
+                summary.excel_path,
+                row_index,
+                "",
+                self.candidate_excel_service.CAPTURE_STATUS_FAILED,
+            )
+            summary.partial_candidate_count += 1
+            summary.failed_candidate_count += 1
             failed_identifier = (
                 candidate_summary.profile_url
                 or candidate_summary.name
                 or "candidate-{}".format(rank_index)
             )
-            summary.failed_candidates.append(failed_identifier)
+            summary.failed_candidates.append(
+                {
+                    "identifier": failed_identifier,
+                    "name": candidate_summary.name or "",
+                    "profile_url": candidate_summary.profile_url or "",
+                    "page_number": page_number,
+                    "rank_index": rank_index,
+                    "row_index": row_index,
+                    "reason": self._classify_candidate_error(exc),
+                    "capture_status": self.candidate_excel_service.CAPTURE_STATUS_FAILED,
+                }
+            )
+
+    def _save_candidate_summary(
+        self,
+        candidate_summary: LiepinSearchCandidate,
+        keyword: str,
+        page_number: int,
+        rank_index: int,
+        summary: SearchTaskExecutionSummary,
+    ) -> int:
+        """Persist the result-card snapshot first, so failed detail extraction remains visible."""
+        return self.candidate_excel_service.append_candidate_row(
+            summary.excel_path,
+            {
+                "序号": summary.sourced_candidate_count + 1,
+                "姓名": candidate_summary.name or "",
+                "年龄": "",
+                "当前岗位": candidate_summary.current_title or "",
+                "当前公司": candidate_summary.current_company or "",
+                "城市": candidate_summary.city or "",
+                "工作年限": candidate_summary.work_years or "",
+                "学历": candidate_summary.education or "",
+                "来源关键词": keyword or "",
+                "页码": page_number,
+                "排名": rank_index,
+                "简历链接": candidate_summary.profile_url or "",
+                "简历抓取状态": self.candidate_excel_service.CAPTURE_STATUS_PENDING,
+                "简历详情": "",
+                "匹配度分数": "",
+                "匹配详情": "",
+                "抓取时间": self.candidate_excel_service.now_text(),
+                "匹配时间": "",
+            },
+        )
+
+    def _classify_candidate_error(self, exc: Exception) -> str:
+        if isinstance(exc, LiepinResumeExtractionError):
+            return "简历提取失败: {}".format(str(exc))
+        return "候选人详情处理失败: {}".format(str(exc))

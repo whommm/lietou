@@ -1,5 +1,6 @@
 """Playwright browser session manager for Liepin automation."""
 
+import logging
 import os
 import queue
 import re
@@ -52,6 +53,7 @@ class LiepinBrowserState:
 
 
 T = TypeVar("T")
+logger = logging.getLogger(__name__)
 
 
 class LiepinBrowserManager:
@@ -75,6 +77,90 @@ class LiepinBrowserManager:
         return os.path.dirname(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         )
+
+    @staticmethod
+    def _find_system_browser_executable() -> tuple:
+        """Prefer installed Chrome/Edge for frozen builds."""
+        local_app_data = os.environ.get("LOCALAPPDATA", "")
+        program_files = os.environ.get("PROGRAMFILES", r"C:\Program Files")
+        program_files_x86 = os.environ.get(
+            "PROGRAMFILES(X86)", r"C:\Program Files (x86)"
+        )
+
+        candidates = [
+            (
+                "chrome",
+                os.path.join(
+                    program_files, "Google", "Chrome", "Application", "chrome.exe"
+                ),
+            ),
+            (
+                "chrome",
+                os.path.join(
+                    program_files_x86,
+                    "Google",
+                    "Chrome",
+                    "Application",
+                    "chrome.exe",
+                ),
+            ),
+            (
+                "chrome",
+                os.path.join(
+                    local_app_data,
+                    "Google",
+                    "Chrome",
+                    "Application",
+                    "chrome.exe",
+                ),
+            ),
+            (
+                "msedge",
+                os.path.join(
+                    program_files,
+                    "Microsoft",
+                    "Edge",
+                    "Application",
+                    "msedge.exe",
+                ),
+            ),
+            (
+                "msedge",
+                os.path.join(
+                    program_files_x86,
+                    "Microsoft",
+                    "Edge",
+                    "Application",
+                    "msedge.exe",
+                ),
+            ),
+            (
+                "msedge",
+                os.path.join(
+                    local_app_data,
+                    "Microsoft",
+                    "Edge",
+                    "Application",
+                    "msedge.exe",
+                ),
+            ),
+        ]
+        for channel, path in candidates:
+            if path and os.path.exists(path):
+                return channel, path
+        return "", ""
+
+    @staticmethod
+    def _configure_playwright_browser_path() -> None:
+        """Point frozen builds to the shared Playwright browser cache."""
+        if os.environ.get("PLAYWRIGHT_BROWSERS_PATH"):
+            return
+        local_app_data = os.environ.get("LOCALAPPDATA", "")
+        if not local_app_data:
+            return
+        shared_browser_dir = os.path.join(local_app_data, "ms-playwright")
+        if os.path.isdir(shared_browser_dir):
+            os.environ["PLAYWRIGHT_BROWSERS_PATH"] = shared_browser_dir
 
     def get_profile_dir(self) -> str:
         """Return the absolute path to the persistent browser profile directory."""
@@ -178,16 +264,72 @@ class LiepinBrowserManager:
         profile_dir = self.get_profile_dir()
         os.makedirs(profile_dir, exist_ok=True)
 
+        if getattr(sys, "frozen", False):
+            self._configure_playwright_browser_path()
+
         self._playwright = sync_playwright().start()
-        browser_type = getattr(
-            self._playwright,
-            self.config_manager.config.liepin_browser_channel,
-            self._playwright.chromium,
+        browser_type = self._playwright.chromium
+        default_launch_kwargs = {
+            "user_data_dir": profile_dir,
+            "headless": self.config_manager.config.liepin_browser_headless,
+            "viewport": {"width": 1440, "height": 960},
+        }
+        launch_kwargs = dict(default_launch_kwargs)
+
+        preferred_channel = self.config_manager.config.liepin_browser_channel
+        executable_path = ""
+        detected_channel = ""
+        if getattr(sys, "frozen", False):
+            detected_channel, executable_path = self._find_system_browser_executable()
+        logger.warning(
+            "Liepin browser launch prepare: frozen=%s, preferred_channel=%s, detected_channel=%s, executable_path=%s, playwright_browsers_path=%s, profile_dir=%s",
+            getattr(sys, "frozen", False),
+            preferred_channel,
+            detected_channel or "",
+            executable_path or "",
+            os.environ.get("PLAYWRIGHT_BROWSERS_PATH", ""),
+            profile_dir,
         )
-        self._context = browser_type.launch_persistent_context(
-            user_data_dir=profile_dir,
-            headless=self.config_manager.config.liepin_browser_headless,
-            viewport={"width": 1440, "height": 960},
+        if executable_path:
+            launch_kwargs["executable_path"] = executable_path
+        elif preferred_channel in ("chrome", "msedge"):
+            launch_kwargs["channel"] = preferred_channel
+
+        if executable_path:
+            logger.warning(
+                "Liepin browser launch mode: system executable (%s)",
+                executable_path,
+            )
+            self._context = browser_type.launch_persistent_context(**launch_kwargs)
+        else:
+            try:
+                logger.warning(
+                    "Liepin browser launch mode: playwright channel/default, launch_kwargs=%s",
+                    {
+                        key: value
+                        for key, value in launch_kwargs.items()
+                        if key != "user_data_dir"
+                    },
+                )
+                self._context = browser_type.launch_persistent_context(**launch_kwargs)
+            except Exception:
+                logger.exception(
+                    "Liepin browser launch fallback triggered, retrying with pure playwright chromium"
+                )
+                self._context = browser_type.launch_persistent_context(
+                    **default_launch_kwargs
+                )
+        actual_browser = (
+            executable_path or launch_kwargs.get("channel") or "playwright-chromium"
+        )
+        logger.warning(
+            "Liepin browser launch success: actual_browser=%s, current_url=%s",
+            actual_browser,
+            (
+                self._pick_best_page(list(self._context.pages)).url
+                if self._context and self._context.pages
+                else ""
+            ),
         )
         self._page = self._pick_best_page(list(self._context.pages))
         if self._page is None:

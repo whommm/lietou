@@ -1,14 +1,12 @@
-"""Batch match UI for candidate ranking and report review."""
+"""Batch match task console."""
 
 import customtkinter as ctk
 from tkinter import messagebox
 from typing import Callable, Dict, List, Optional
 
-from .html_renderer import HtmlRenderer
-
 
 class BatchMatchWidget(ctk.CTkFrame):
-    """Batch match workspace."""
+    """Batch match workspace focused on Excel task execution."""
 
     PALETTE = {
         "light": {
@@ -39,58 +37,65 @@ class BatchMatchWidget(ctk.CTkFrame):
         self,
         master,
         on_run_batch: Callable,
+        on_cancel_batch: Optional[Callable] = None,
+        on_load_recent_batch: Optional[Callable] = None,
+        on_open_excel: Optional[Callable] = None,
+        on_open_excel_dir: Optional[Callable] = None,
         on_pick_job_history: Optional[Callable] = None,
         theme: str = "light",
         **kwargs,
     ):
         super().__init__(master, **kwargs)
         self.on_run_batch = on_run_batch
+        self.on_cancel_batch = on_cancel_batch
+        self.on_load_recent_batch = on_load_recent_batch
+        self.on_open_excel = on_open_excel
+        self.on_open_excel_dir = on_open_excel_dir
         self.on_pick_job_history = on_pick_job_history
         self.theme = theme
         self.job_options: List[str] = ["请先分析岗位"]
         self.job_data_map: Dict[str, Dict[str, object]] = {}
-        self.candidate_options: List[str] = []
-        self.candidate_data_map: Dict[str, Dict[str, str]] = {}
-        self.result_data_map: Dict[str, Dict[str, str]] = {}
+        self._excel_file_path: str = ""
 
         self._setup_ui()
 
     def _setup_ui(self):
         self.configure(fg_color="transparent")
-        self.grid_columnconfigure(0, weight=2)
-        self.grid_columnconfigure(1, weight=3)
+        self.grid_columnconfigure(0, weight=4)
+        self.grid_columnconfigure(1, weight=5)
         self.grid_rowconfigure(0, weight=1)
 
         self._build_control_panel()
-        self._build_result_panel()
+        self._build_status_panel()
 
     def _build_control_panel(self):
         colors = self.PALETTE[self.theme]
-        frame = ctk.CTkFrame(
+        frame = ctk.CTkScrollableFrame(
             self,
             corner_radius=24,
             fg_color=colors["panel"],
             border_width=1,
             border_color=colors["border"],
         )
-        frame.grid(row=0, column=0, padx=(10, 5), pady=10, sticky="nsew")
+        frame.grid(row=0, column=0, padx=(10, 6), pady=10, sticky="nsew")
         frame.grid_columnconfigure(0, weight=1)
-        frame.grid_rowconfigure(7, weight=1)
 
         ctk.CTkLabel(
             frame,
-            text="批量匹配工作台",
-            font=ctk.CTkFont(size=18, weight="bold"),
+            text="批量匹配",
+            font=ctk.CTkFont(size=20, weight="bold"),
             text_color=colors["text"],
-        ).grid(row=0, column=0, padx=16, pady=(16, 5), sticky="w")
+        ).grid(row=0, column=0, padx=16, pady=(16, 4), sticky="w")
         ctk.CTkLabel(
             frame,
-            text="选择岗位与候选人集合，批量生成排序结果和单人匹配报告。",
+            text="选择岗位并导入 Excel 后，程序会批量处理可匹配候选人并将结果回写到原文件。",
             font=ctk.CTkFont(size=12),
             text_color=colors["muted"],
+            justify="left",
+            wraplength=280,
         ).grid(row=1, column=0, padx=16, pady=(0, 12), sticky="w")
 
-        ctk.CTkLabel(frame, text="目标岗位:", text_color=colors["text"]).grid(
+        ctk.CTkLabel(frame, text="目标岗位", text_color=colors["text"]).grid(
             row=2, column=0, padx=16, pady=(8, 6), sticky="w"
         )
         job_row = ctk.CTkFrame(frame, fg_color="transparent")
@@ -126,27 +131,61 @@ class BatchMatchWidget(ctk.CTkFrame):
         )
         self.pick_job_btn.grid(row=0, column=1, padx=(10, 0), sticky="e")
 
-        ctk.CTkLabel(frame, text="候选人预览:", text_color=colors["text"]).grid(
-            row=4, column=0, padx=16, pady=(6, 6), sticky="w"
-        )
-        self.candidate_box = ctk.CTkTextbox(
+        status_card = ctk.CTkFrame(
             frame,
-            height=220,
-            wrap="word",
             corner_radius=18,
+            fg_color=colors["panel_alt"],
             border_width=1,
             border_color=colors["border"],
-            fg_color=colors["panel_alt"],
-            text_color=colors["text"],
-            scrollbar_button_color=colors["accent"],
-            scrollbar_button_hover_color=colors["accent_hover"],
         )
-        self.candidate_box.grid(row=5, column=0, padx=16, pady=(0, 10), sticky="nsew")
+        status_card.grid(row=4, column=0, padx=16, pady=(0, 10), sticky="ew")
+        status_card.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            status_card,
+            text="Excel 状态",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color=colors["text"],
+        ).grid(row=0, column=0, padx=14, pady=(14, 4), sticky="w")
+
+        self.candidate_count_label = ctk.CTkLabel(
+            status_card,
+            text="当前未导入 Excel",
+            text_color=colors["muted"],
+            anchor="w",
+            justify="left",
+            wraplength=260,
+        )
+        self.candidate_count_label.grid(row=1, column=0, padx=14, sticky="w")
+
+        self.candidate_preview_label = ctk.CTkLabel(
+            status_card,
+            text="导入后将自动统计可匹配候选人数量。",
+            text_color=colors["muted"],
+            anchor="w",
+            justify="left",
+            wraplength=260,
+        )
+        self.candidate_preview_label.grid(
+            row=2, column=0, padx=14, pady=(6, 14), sticky="w"
+        )
+
+        self.import_excel_btn = ctk.CTkButton(
+            frame,
+            text="导入 Excel",
+            height=38,
+            corner_radius=18,
+            fg_color=colors["secondary"],
+            hover_color=colors["secondary_hover"],
+            text_color=colors["text"],
+            command=self._on_load_recent_batch_click,
+        )
+        self.import_excel_btn.grid(row=5, column=0, padx=16, pady=(0, 10), sticky="ew")
 
         self.run_batch_btn = ctk.CTkButton(
             frame,
             text="开始批量匹配",
-            height=40,
+            height=42,
             corner_radius=20,
             fg_color=colors["accent"],
             hover_color=colors["accent_hover"],
@@ -154,19 +193,22 @@ class BatchMatchWidget(ctk.CTkFrame):
             font=ctk.CTkFont(size=12, weight="bold"),
             command=self._on_run_batch_click,
         )
-        self.run_batch_btn.grid(row=6, column=0, padx=16, pady=(0, 12), sticky="ew")
+        self.run_batch_btn.grid(row=6, column=0, padx=16, pady=(0, 10), sticky="ew")
 
-        self.info_label = ctk.CTkLabel(
+        self.cancel_batch_btn = ctk.CTkButton(
             frame,
-            text="等待选择岗位与候选人集合。",
-            text_color=colors["muted"],
-            font=ctk.CTkFont(size=12),
-            justify="left",
-            wraplength=360,
+            text="取消当前批量匹配",
+            height=38,
+            corner_radius=18,
+            fg_color=colors["secondary"],
+            hover_color=colors["secondary_hover"],
+            text_color=colors["text"],
+            command=self._on_cancel_batch_click,
+            state="disabled",
         )
-        self.info_label.grid(row=7, column=0, padx=16, pady=(0, 16), sticky="nw")
+        self.cancel_batch_btn.grid(row=7, column=0, padx=16, pady=(0, 16), sticky="ew")
 
-    def _build_result_panel(self):
+    def _build_status_panel(self):
         colors = self.PALETTE[self.theme]
         frame = ctk.CTkFrame(
             self,
@@ -175,19 +217,69 @@ class BatchMatchWidget(ctk.CTkFrame):
             border_width=1,
             border_color=colors["border"],
         )
-        frame.grid(row=0, column=1, padx=(5, 10), pady=10, sticky="nsew")
+        frame.grid(row=0, column=1, padx=(6, 10), pady=10, sticky="nsew")
         frame.grid_columnconfigure(0, weight=1)
-        frame.grid_rowconfigure(1, weight=2)
-        frame.grid_rowconfigure(3, weight=3)
+        frame.grid_rowconfigure(4, weight=1)
 
         ctk.CTkLabel(
             frame,
-            text="匹配排序结果",
-            font=ctk.CTkFont(size=18, weight="bold"),
+            text="任务结果",
+            font=ctk.CTkFont(size=20, weight="bold"),
             text_color=colors["text"],
-        ).grid(row=0, column=0, padx=16, pady=(16, 8), sticky="w")
+        ).grid(row=0, column=0, padx=16, pady=(16, 4), sticky="w")
+        ctk.CTkLabel(
+            frame,
+            text="这里显示当前文件路径、执行进度和回写结果摘要。",
+            font=ctk.CTkFont(size=12),
+            text_color=colors["muted"],
+            justify="left",
+            wraplength=420,
+        ).grid(row=1, column=0, padx=16, pady=(0, 12), sticky="w")
 
-        self.result_box = ctk.CTkTextbox(
+        action_row = ctk.CTkFrame(frame, fg_color="transparent")
+        action_row.grid(row=2, column=0, padx=16, pady=(0, 10), sticky="ew")
+        action_row.grid_columnconfigure((0, 1), weight=1)
+
+        self.open_excel_btn = ctk.CTkButton(
+            action_row,
+            text="打开当前 Excel",
+            height=36,
+            corner_radius=16,
+            fg_color=colors["secondary"],
+            hover_color=colors["secondary_hover"],
+            text_color=colors["text"],
+            command=self._on_open_excel_click,
+        )
+        self.open_excel_btn.grid(row=0, column=0, padx=(0, 6), sticky="ew")
+
+        self.open_excel_dir_btn = ctk.CTkButton(
+            action_row,
+            text="打开 Excel 文件目录",
+            height=36,
+            corner_radius=16,
+            fg_color=colors["secondary"],
+            hover_color=colors["secondary_hover"],
+            text_color=colors["text"],
+            command=self._on_open_excel_dir_click,
+        )
+        self.open_excel_dir_btn.grid(row=0, column=1, padx=(6, 0), sticky="ew")
+
+        self.excel_path_box = ctk.CTkTextbox(
+            frame,
+            height=90,
+            wrap="word",
+            corner_radius=18,
+            border_width=1,
+            border_color=colors["border"],
+            fg_color=colors["panel_alt"],
+            text_color=colors["text"],
+            scrollbar_button_color=colors["accent"],
+            scrollbar_button_hover_color=colors["accent_hover"],
+        )
+        self.excel_path_box.grid(row=3, column=0, padx=16, pady=(0, 10), sticky="ew")
+        self.excel_path_box.insert("1.0", "当前未导入 Excel 文件。")
+
+        self.summary_box = ctk.CTkTextbox(
             frame,
             wrap="word",
             corner_radius=18,
@@ -198,19 +290,21 @@ class BatchMatchWidget(ctk.CTkFrame):
             scrollbar_button_color=colors["accent"],
             scrollbar_button_hover_color=colors["accent_hover"],
         )
-        self.result_box.grid(row=1, column=0, padx=16, pady=(0, 12), sticky="nsew")
+        self.summary_box.grid(row=4, column=0, padx=16, pady=(0, 10), sticky="nsew")
+        self.summary_box.insert(
+            "1.0",
+            "等待导入 Excel。\n开始批量匹配后，这里会显示处理进度和结果摘要。",
+        )
 
-        ctk.CTkLabel(
+        self.info_label = ctk.CTkLabel(
             frame,
-            text="单人完整报告",
-            font=ctk.CTkFont(size=16, weight="bold"),
-            text_color=colors["text"],
-        ).grid(row=2, column=0, padx=16, pady=(0, 8), sticky="w")
-
-        self.html_renderer = HtmlRenderer(frame, theme=self.theme)
-        self.html_renderer.grid(row=3, column=0, padx=16, pady=(0, 16), sticky="nsew")
-
-        self.result_box.insert("1.0", "等待批量匹配结果...")
+            text="等待选择岗位并导入 Excel。",
+            text_color=colors["muted"],
+            font=ctk.CTkFont(size=12),
+            justify="left",
+            wraplength=420,
+        )
+        self.info_label.grid(row=5, column=0, padx=16, pady=(0, 16), sticky="w")
 
     def _on_pick_job_click(self):
         if self.on_pick_job_history:
@@ -222,13 +316,28 @@ class BatchMatchWidget(ctk.CTkFrame):
         if not payload:
             messagebox.showwarning("提示", "请先选择目标岗位")
             return
-        if not self.candidate_data_map:
-            messagebox.showwarning("提示", "当前没有候选人可供批量匹配")
+        if not self._excel_file_path:
+            messagebox.showwarning("提示", "请先导入候选人 Excel")
             return
-
         self.set_running(True)
-        self.info_label.configure(text="正在执行批量匹配，请稍候...")
+        self._set_summary_text("正在执行批量匹配，请稍候...")
         self.on_run_batch(job_label, payload)
+
+    def _on_cancel_batch_click(self):
+        if self.on_cancel_batch:
+            self.on_cancel_batch()
+
+    def _on_load_recent_batch_click(self):
+        if self.on_load_recent_batch:
+            self.on_load_recent_batch()
+
+    def _on_open_excel_click(self):
+        if self.on_open_excel:
+            self.on_open_excel()
+
+    def _on_open_excel_dir_click(self):
+        if self.on_open_excel_dir:
+            self.on_open_excel_dir()
 
     def update_job_options(
         self, job_options: List[str], job_data_map: Dict[str, Dict[str, object]]
@@ -239,64 +348,51 @@ class BatchMatchWidget(ctk.CTkFrame):
         if self.job_options:
             self.job_combo.set(self.job_options[0])
 
-    def update_candidates(self, candidates: List[Dict[str, str]]):
-        self.candidate_data_map = {
-            item.get("candidate_id") or item.get("profile_url") or str(index): item
-            for index, item in enumerate(candidates)
-        }
-        self.candidate_options = list(self.candidate_data_map.keys())
-        self.candidate_box.delete("1.0", "end")
-        if not candidates:
-            self.candidate_box.insert(
-                "1.0", "当前没有候选人，请先去候选人库将当前结果页候选人入库。"
-            )
-            return
-
-        rows = []
-        for index, item in enumerate(candidates, start=1):
-            rows.append(
-                "{}. {} | {} | {}\n来源关键词: {}\n".format(
-                    index,
-                    item.get("name", "未命名候选人"),
-                    item.get("current_title", ""),
-                    item.get("current_company", ""),
-                    item.get("keyword", ""),
-                )
-            )
-        self.candidate_box.insert("1.0", "\n".join(rows).strip())
-
     def set_running(self, running: bool):
         state = "disabled" if running else "normal"
         self.job_combo.configure(state=state)
         self.pick_job_btn.configure(state=state)
+        self.import_excel_btn.configure(state=state)
+        self.open_excel_btn.configure(state=state)
+        self.open_excel_dir_btn.configure(state=state)
         self.run_batch_btn.configure(
             state=state,
             text="批量匹配中..." if running else "开始批量匹配",
         )
+        self.cancel_batch_btn.configure(state="normal" if running else "disabled")
 
-    def set_results(self, results: List[Dict[str, str]], info_text: str):
-        self.result_data_map = {
-            item.get("result_id") or str(index): item
-            for index, item in enumerate(results)
-        }
-        self.info_label.configure(text=info_text)
-        self.result_box.delete("1.0", "end")
-        if not results:
-            self.result_box.insert("1.0", "本次批量匹配没有产生结果。")
-            self.html_renderer.clear()
-            return
+    def set_results(self, info_text: str):
+        self._set_summary_text(info_text)
 
-        rows = []
-        for index, item in enumerate(results, start=1):
-            rows.append(
-                "{}. {} | 分数: {} | 动作: {}\n摘要: {}\n风险: {}\n".format(
-                    index,
-                    item.get("candidate_name", "未命名候选人"),
-                    item.get("score", "待解析"),
-                    item.get("recommendation", "待解析"),
-                    item.get("summary", ""),
-                    item.get("risks", ""),
-                )
+    def set_progress(self, current: int, total: int, candidate_name: str):
+        text = "批量匹配进行中：{}/{}，当前处理 {}。".format(
+            current,
+            total,
+            candidate_name or "未命名候选人",
+        )
+        self._set_summary_text(text)
+
+    def set_excel_file(self, file_path: str, matchable_count: int = 0):
+        self._excel_file_path = file_path or ""
+        self.excel_path_box.delete("1.0", "end")
+        self.excel_path_box.insert("1.0", file_path or "当前未导入 Excel 文件。")
+        if file_path:
+            self.candidate_count_label.configure(
+                text="可匹配候选人 {} 位".format(matchable_count)
             )
-        self.result_box.insert("1.0", "\n".join(rows).strip())
-        self.html_renderer.set_content(results[0].get("full_report_html", ""))
+            self.candidate_preview_label.configure(
+                text="结果将直接回写到该 Excel 文件。"
+            )
+        else:
+            self.candidate_count_label.configure(text="当前未导入 Excel")
+            self.candidate_preview_label.configure(
+                text="导入后将自动统计可匹配候选人数量。"
+            )
+
+    def get_excel_file(self) -> str:
+        return self._excel_file_path
+
+    def _set_summary_text(self, text: str):
+        self.summary_box.delete("1.0", "end")
+        self.summary_box.insert("1.0", text)
+        self.info_label.configure(text=text.splitlines()[0] if text else "")

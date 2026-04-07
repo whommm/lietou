@@ -30,7 +30,18 @@ class BatchMatchResult:
     recommendation: str = ""
     summary: str = ""
     risks: str = ""
-    full_report_html: str = ""
+    detail: str = ""
     status: str = "pending"
     created_at: str = ""
     updated_at: str = ""
+
+
+@dataclass
+class BatchMatchJobCandidate:
+    """Snapshot entry linking a batch match job to one candidate."""
+
+    id: str
+    batch_job_id: str
+    candidate_id: str
+    snapshot_order: int
+    created_at: str = ""

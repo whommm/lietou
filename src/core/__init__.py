@@ -1,8 +1,7 @@
 """Core services for the Liepin workbench."""
 
-from .batch_match_repository import BatchMatchRepository
 from .batch_match_service import BatchMatchService
-from .candidate_repository import CandidateRepository
+from .candidate_excel_service import CandidateExcelService
 from .database import DatabaseManager
 from .liepin_browser import (
     LiepinBrowserError,
@@ -29,9 +28,8 @@ from .search_strategy_service import SearchStrategy, SearchStrategyService
 from .search_task_repository import SearchTaskRepository
 
 __all__ = [
-    "BatchMatchRepository",
     "BatchMatchService",
-    "CandidateRepository",
+    "CandidateExcelService",
     "DatabaseManager",
     "LiepinBrowserError",
     "LiepinBrowserManager",

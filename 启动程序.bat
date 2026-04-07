@@ -16,7 +16,7 @@ if not exist "venv\Scripts\python.exe" (
 )
 
 echo [检查] 检查依赖包...
-venv\Scripts\python.exe -c "import customtkinter" 2>nul
+venv\Scripts\python.exe -c "import customtkinter, openpyxl" 2>nul
 if errorlevel 1 (
     echo [安装] 正在安装依赖包...
     venv\Scripts\pip.exe install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple

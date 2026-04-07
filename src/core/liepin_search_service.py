@@ -69,6 +69,15 @@ class LiepinSearchService:
         'a[href*="/candidates/"]',
         "a",
     ]
+    NEXT_PAGE_SELECTORS = [
+        'button:has-text("下一页")',
+        'a:has-text("下一页")',
+        ".ant-pagination-next button",
+        ".ant-pagination-next a",
+        ".pagination-next",
+        '[aria-label*="下一页"]',
+        '[title*="下一页"]',
+    ]
 
     def __init__(self, browser_manager: LiepinBrowserManager):
         self.browser_manager = browser_manager
@@ -135,6 +144,43 @@ class LiepinSearchService:
             return page
 
         return self.browser_manager.run_with_page(_run)
+
+    def go_to_next_result_page(self, page: Page) -> bool:
+        """Move to the next result page when pagination is available."""
+        next_button = self._find_next_page_control(page)
+        if next_button is None:
+            return False
+
+        previous_url = ""
+        try:
+            previous_url = page.url or ""
+        except Exception:
+            previous_url = ""
+
+        try:
+            next_button.scroll_into_view_if_needed(timeout=2000)
+        except Exception:
+            pass
+
+        try:
+            next_button.click(timeout=5000)
+        except Exception as exc:
+            raise LiepinSearchPageChangedError("翻到下一页失败: {}".format(str(exc)))
+
+        try:
+            page.wait_for_load_state("domcontentloaded", timeout=10000)
+        except Exception:
+            pass
+
+        self._wait_for_results(page)
+
+        if previous_url:
+            try:
+                page.wait_for_timeout(800)
+            except Exception:
+                pass
+
+        return True
 
     def _execute_search(self, page: Page, keyword: str) -> None:
         """Fill the most likely search field and submit the search.
@@ -460,6 +506,35 @@ class LiepinSearchService:
             if href:
                 return href
         return ""
+
+    def _find_next_page_control(self, page: Page):
+        for selector in self.NEXT_PAGE_SELECTORS:
+            locator = page.locator(selector).first
+            try:
+                if not locator.is_visible(timeout=1500):
+                    continue
+                if self._is_disabled_pagination(locator):
+                    continue
+                return locator
+            except Exception:
+                continue
+        return None
+
+    @staticmethod
+    def _is_disabled_pagination(locator) -> bool:
+        try:
+            disabled = locator.get_attribute("disabled")
+            aria_disabled = (locator.get_attribute("aria-disabled") or "").lower()
+            class_name = (locator.get_attribute("class") or "").lower()
+        except Exception:
+            return False
+
+        return (
+            disabled is not None
+            or aria_disabled == "true"
+            or "disabled" in class_name
+            or "ant-pagination-disabled" in class_name
+        )
 
     def _first_visible_locator(self, page: Page, selectors: List[str]):
         for selector in selectors:

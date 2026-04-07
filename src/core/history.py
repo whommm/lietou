@@ -9,6 +9,9 @@ from datetime import datetime
 from dataclasses import dataclass, asdict
 from typing import List, Optional
 
+from .analysis_history_repository import AnalysisHistoryRepository
+from .database import DatabaseManager
+
 
 @dataclass
 class HistoryRecord:
@@ -49,10 +52,17 @@ class HistoryManager:
         re.IGNORECASE,
     )
 
-    def __init__(self, record_type: str = "job_analysis", max_records: int = 50):
+    def __init__(
+        self,
+        record_type: str = "job_analysis",
+        max_records: int = 50,
+        history_path: Optional[str] = None,
+        db_path: Optional[str] = None,
+    ):
         self.record_type = record_type
-        self.history_path = self._get_history_path(record_type)
+        self.history_path = history_path or self._get_history_path(record_type)
         self.max_records = max_records
+        self.repository = AnalysisHistoryRepository(DatabaseManager(db_path=db_path))
         self.records: List[HistoryRecord] = self._load_history()
         self._enforce_limit()
 
@@ -75,11 +85,22 @@ class HistoryManager:
 
     def _load_history(self) -> List[HistoryRecord]:
         """从文件加载历史记录"""
+        records = self.repository.list_by_type(self.record_type)
+        if records:
+            return records[: self.max_records]
+
         if os.path.exists(self.history_path):
             try:
                 with open(self.history_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                return [HistoryRecord(**item) for item in data]
+                records = [HistoryRecord(**item) for item in data]
+                for record in records:
+                    if not record.record_type:
+                        record.record_type = self.record_type
+                    self.repository.upsert(record)
+                return self.repository.list_by_type(self.record_type)[
+                    : self.max_records
+                ]
             except (json.JSONDecodeError, TypeError, KeyError):
                 return []
         return []
@@ -229,18 +250,22 @@ class HistoryManager:
         )
         self.records.insert(0, record)
         self._enforce_limit()
+        self.repository.upsert(record)
         self._save_history()
         return record
 
     def get_all(self) -> List[HistoryRecord]:
         """获取所有历史记录"""
+        self.records = self.repository.list_by_type(self.record_type)[
+            : self.max_records
+        ]
         return self.records
 
     def get_by_id(self, record_id: str) -> Optional[HistoryRecord]:
         """按ID获取记录"""
-        for record in self.records:
-            if record.id == record_id:
-                return record
+        record = self.repository.get_by_id(record_id)
+        if record and record.record_type == self.record_type:
+            return record
         return None
 
     def delete(self, record_id: str) -> bool:
@@ -248,6 +273,7 @@ class HistoryManager:
         for i, record in enumerate(self.records):
             if record.id == record_id:
                 self.records.pop(i)
+                self.repository.delete(record_id)
                 self._save_history()
                 return True
         return False
@@ -255,6 +281,7 @@ class HistoryManager:
     def clear(self) -> bool:
         """清空所有历史记录"""
         self.records.clear()
+        self.repository.clear_by_type(self.record_type)
         return self._save_history()
 
     def export_txt(self, filepath: str) -> bool:

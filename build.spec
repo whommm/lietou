@@ -37,6 +37,8 @@ a = Analysis(
         'requests',
         'tiktoken',
         'playwright',
+        'openpyxl',
+        'et_xmlfile',
     ],
     hookspath=[],
     hooksconfig={},

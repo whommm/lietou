@@ -1,14 +1,15 @@
 """主窗口 UI 模块。"""
 
 import threading
+import os
 from tkinter import TclError, messagebox
 from typing import Optional
+from tkinter import filedialog
 
 import customtkinter as ctk
 
-from ..core.batch_match_repository import BatchMatchRepository
 from ..core.batch_match_service import BatchMatchService
-from ..core.candidate_repository import CandidateRepository
+from ..core.candidate_excel_service import CandidateExcelService
 from ..core.company_research_client import CompanyResearchClient
 from ..core.config import ConfigManager
 from ..core.database import DatabaseManager
@@ -67,16 +68,14 @@ class MainWindow(ctk.CTk):
         self.company_history_manager = HistoryManager(record_type="company_research")
         self.database_manager = DatabaseManager()
         self.search_task_repository = SearchTaskRepository(self.database_manager)
-        self.candidate_repository = CandidateRepository(self.database_manager)
-        self.batch_match_repository = BatchMatchRepository(self.database_manager)
+        self.candidate_excel_service = CandidateExcelService()
         self.search_strategy_service = SearchStrategyService()
         self.liepin_browser_manager = LiepinBrowserManager(self.config_manager)
         self.liepin_search_service = LiepinSearchService(self.liepin_browser_manager)
         self.liepin_resume_extractor = LiepinResumeExtractor()
-        self.batch_match_service = BatchMatchService(self.batch_match_repository)
         self.liepin_search_task_service = LiepinSearchTaskService(
             task_repository=self.search_task_repository,
-            candidate_repository=self.candidate_repository,
+            candidate_excel_service=self.candidate_excel_service,
             search_service=self.liepin_search_service,
             resume_extractor=self.liepin_resume_extractor,
         )
@@ -96,10 +95,12 @@ class MainWindow(ctk.CTk):
         self._candidate_search_thread: Optional[threading.Thread] = None
         self._batch_match_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
+        self._batch_match_cancel_event = threading.Event()
 
         self._raw_result = ""
         self._current_jd = ""
         self._candidate_job_map = {}
+        self._current_candidate_excel_path = ""
 
         self._build_ui()
         self._load_config_to_ui()
@@ -261,7 +262,7 @@ class MainWindow(ctk.CTk):
         self.tab_company = self.tabview.add("公司调研")
         self.tab_job = self.tabview.add("岗位分析")
         self.tab_resume = self.tabview.add("简历匹配")
-        self.tab_candidates = self.tabview.add("候选人库")
+        self.tab_candidates = self.tabview.add("候选人抓取")
         self.tab_batch = self.tabview.add("批量匹配")
 
         self._build_company_research_tab()
@@ -308,7 +309,7 @@ class MainWindow(ctk.CTk):
         )
 
     def _build_candidate_library_tab(self):
-        """构建候选人库标签页。"""
+        """构建候选人抓取标签页。"""
         self.tab_candidates.grid_columnconfigure(0, weight=2)
         self.tab_candidates.grid_columnconfigure(1, weight=3)
         self.tab_candidates.grid_rowconfigure(0, weight=1)
@@ -318,6 +319,9 @@ class MainWindow(ctk.CTk):
             on_launch_browser=self._on_launch_liepin_browser,
             on_check_login=self._on_check_liepin_login,
             on_run_task=self._on_run_candidate_task,
+            on_import_excel=self._on_import_candidate_excel,
+            on_open_excel=self._on_open_candidate_excel,
+            on_open_excel_dir=self._on_open_candidate_excel_dir,
             on_export_debug=self._on_export_liepin_debug,
             on_pick_job_history=self._open_job_history_picker,
             theme=self.FIXED_THEME,
@@ -335,6 +339,10 @@ class MainWindow(ctk.CTk):
         self.batch_match_widget = BatchMatchWidget(
             self.tab_batch,
             on_run_batch=self._on_run_batch_match,
+            on_cancel_batch=self._on_cancel_batch_match,
+            on_load_recent_batch=self._on_import_candidate_excel,
+            on_open_excel=self._on_open_candidate_excel,
+            on_open_excel_dir=self._on_open_candidate_excel_dir,
             on_pick_job_history=self._open_job_history_picker,
             theme=self.FIXED_THEME,
         )
@@ -491,7 +499,7 @@ class MainWindow(ctk.CTk):
         return "[简历匹配]\n岗位: {}\n简历摘要: {}".format(job_summary, resume_summary)
 
     def _build_candidate_job_payload(self, record) -> dict:
-        """为候选人库构建岗位与搜索策略数据。"""
+        """为候选人抓取页构建岗位与搜索策略数据。"""
         strategy = self.search_strategy_service.build_from_analysis_result(
             record.result
         )
@@ -773,7 +781,7 @@ class MainWindow(ctk.CTk):
             self._set_status("导出页面诊断失败")
 
     def _send_analysis_to_candidates(self, jd_text: str, analysis_result: str):
-        """将当前岗位分析结果同步到候选人库。"""
+        """将当前岗位分析结果同步到候选人抓取页。"""
         target_record = None
         for record in self.job_history_manager.get_all():
             if record.jd_text == jd_text and record.result == analysis_result:
@@ -795,8 +803,8 @@ class MainWindow(ctk.CTk):
             return
 
         self._update_candidate_job_list(selected_record=target_record)
-        self.tabview.set("候选人库")
-        self._set_status("已将岗位分析同步到候选人库")
+        self.tabview.set("候选人抓取")
+        self._set_status("已将岗位分析同步到候选人抓取页")
 
     def _on_run_candidate_task(
         self,
@@ -829,33 +837,40 @@ class MainWindow(ctk.CTk):
         """后台执行当前结果页入库任务。"""
         try:
             summary = self.liepin_search_task_service.run_task(task_id)
-            candidates = self.candidate_repository.list_by_search_task(task_id)
-            source_map = {}
-            for candidate in candidates:
-                sources = self.candidate_repository.list_sources_for_candidate(
-                    candidate.id
+            candidate_payload = self._build_candidate_excel_payloads(
+                self.candidate_excel_service.load_candidates(summary.excel_path)
+            )
+            failed_preview = ""
+            if summary.failed_candidates:
+                failed_lines = []
+                for item in summary.failed_candidates[:3]:
+                    failed_lines.append(
+                        "第{}页-第{}位 {}：{}".format(
+                            item.get("page_number", "?"),
+                            item.get("rank_index", "?"),
+                            item.get("name")
+                            or item.get("identifier")
+                            or "未命名候选人",
+                            item.get("reason", "处理失败"),
+                        )
+                    )
+                failed_preview = "\n失败示例：{}".format("；".join(failed_lines))
+            summary_text = (
+                "结果页入库完成：已处理 {} 页，来源标签 {} 个，收录线索 {} 位，完整简历 {} 位，待补抓 {} 位，失败 {} 位。\nExcel 文件：{}".format(
+                    summary.pages_processed,
+                    len(summary.processed_keywords),
+                    summary.sourced_candidate_count,
+                    summary.enriched_candidate_count,
+                    summary.partial_candidate_count,
+                    summary.failed_candidate_count,
+                    summary.excel_path,
                 )
-                source_map[candidate.id] = sources[0].keyword if sources else ""
-
-            candidate_payload = [
-                {
-                    "name": item.name,
-                    "current_title": item.current_title,
-                    "current_company": item.current_company,
-                    "profile_url": item.profile_url,
-                    "resume_text": item.resume_text,
-                    "keyword": source_map.get(item.id, ""),
-                }
-                for item in candidates
-            ]
-            summary_text = "结果页入库完成：来源标签 {} 个，成功入库 {} 位候选人，失败 {} 位。".format(
-                len(summary.processed_keywords),
-                summary.candidate_count,
-                len(summary.failed_candidates),
+                + failed_preview
             )
             self._safe_after(
                 self._on_candidate_task_complete,
                 task_id,
+                summary.excel_path,
                 candidate_payload,
                 summary_text,
                 None,
@@ -864,6 +879,7 @@ class MainWindow(ctk.CTk):
             self._safe_after(
                 self._on_candidate_task_complete,
                 task_id,
+                "",
                 [],
                 "",
                 str(exc),
@@ -872,6 +888,7 @@ class MainWindow(ctk.CTk):
     def _on_candidate_task_complete(
         self,
         task_id: str,
+        excel_path: str,
         candidates: list,
         summary_text: str,
         error: Optional[str],
@@ -882,12 +899,17 @@ class MainWindow(ctk.CTk):
             messagebox.showerror("结果页入库失败", error)
             self._set_status("结果页入库失败")
             self.candidate_library_widget.set_task_result(
-                task_id, [], "任务失败：{}".format(error)
+                task_id, "任务失败：{}".format(error)
             )
             return
 
-        self.candidate_library_widget.set_task_result(task_id, candidates, summary_text)
-        self.batch_match_widget.update_candidates(candidates)
+        self._current_candidate_excel_path = excel_path
+        self.candidate_library_widget.set_task_result(task_id, summary_text)
+        self.candidate_library_widget.set_excel_file(excel_path)
+        self.batch_match_widget.set_excel_file(
+            excel_path,
+            self.candidate_excel_service.count_matchable_candidates(excel_path),
+        )
         self._set_status("结果页入库完成")
 
     def _on_run_batch_match(self, job_label: str, payload: dict):
@@ -903,17 +925,24 @@ class MainWindow(ctk.CTk):
             return
         url, key, model = config
 
-        candidates = self.candidate_library_widget.get_candidate_records()
+        excel_path = self.batch_match_widget.get_excel_file()
+        if not excel_path:
+            messagebox.showwarning("提示", "请先导入候选人 Excel 文件")
+            self.batch_match_widget.set_running(False)
+            return
+
+        candidates = self.candidate_excel_service.load_matchable_candidates(excel_path)
         if not candidates:
-            messagebox.showwarning("提示", "当前没有候选人，请先在候选人库完成采集")
+            messagebox.showwarning("提示", "当前 Excel 中没有可匹配候选人")
             self.batch_match_widget.set_running(False)
             return
 
         self._set_status("已创建批量匹配任务，正在执行...")
+        self._batch_match_cancel_event.clear()
         self._run_threaded_task(
             "_batch_match_thread",
             self._do_batch_match,
-            (url, key, model, payload, candidates),
+            (url, key, model, payload, excel_path, candidates),
         )
 
     def _do_batch_match(
@@ -922,49 +951,47 @@ class MainWindow(ctk.CTk):
         key: str,
         model: str,
         payload: dict,
-        candidate_payloads: list,
+        excel_path: str,
+        candidates: list,
     ):
         """后台执行批量匹配任务。"""
         try:
             llm_client = self._create_llm_client(url, key, model, 60)
-            service = BatchMatchService(self.batch_match_repository, llm_client)
-            candidates = []
-            for item in candidate_payloads:
-                candidate = self.candidate_repository.get_by_profile_url(
-                    item.get("profile_url", "")
-                )
-                if candidate is not None:
-                    candidates.append(candidate)
-
-            batch_job = service.create_job(
-                job_history_id=payload["record_id"],
-                candidates=candidates,
-                search_task_id=self.candidate_library_widget.task_id or None,
+            service = BatchMatchService(None, llm_client)
+            results = service.match_excel_candidates(
+                payload["job_description"],
+                candidates,
+                progress_callback=self._on_batch_match_progress,
             )
-            results = service.run_job(batch_job, payload["job_description"], candidates)
+            if self._batch_match_cancel_event.is_set():
+                raise RuntimeError("用户已取消批量匹配")
 
             result_payload = []
             for result in results:
-                candidate = self.candidate_repository.get_by_id(result.candidate_id)
+                self.candidate_excel_service.write_match_result(
+                    excel_path,
+                    result.row_index,
+                    result.score,
+                    result.detail,
+                )
                 result_payload.append(
                     {
-                        "result_id": result.id,
-                        "candidate_id": result.candidate_id,
-                        "candidate_name": candidate.name
-                        if candidate
-                        else "未命名候选人",
+                        "result_id": str(result.row_index),
+                        "candidate_id": str(result.row_index),
+                        "candidate_name": result.candidate_name,
                         "score": result.score if result.score is not None else "待解析",
                         "recommendation": result.recommendation or "待解析",
                         "summary": result.summary or "",
                         "risks": result.risks or "",
-                        "full_report_html": result.full_report_html,
+                        "match_detail": result.detail,
                     }
                 )
-            summary_text = "批量匹配完成：共处理 {} 位候选人。".format(
-                len(result_payload)
+            summary_text = "批量匹配完成：共处理 {} 位候选人，结果已回写 Excel。\nExcel 文件：{}".format(
+                len(result_payload), excel_path
             )
             self._safe_after(
                 self._on_batch_match_complete,
+                excel_path,
                 result_payload,
                 summary_text,
                 None,
@@ -972,13 +999,49 @@ class MainWindow(ctk.CTk):
         except Exception as exc:
             self._safe_after(
                 self._on_batch_match_complete,
+                excel_path,
                 [],
                 "",
                 str(exc),
             )
 
+    def _on_batch_match_progress(self, current: int, total: int, candidate) -> None:
+        """Receive batch progress updates from the worker thread."""
+        candidate_name = getattr(candidate, "name", "") or "未命名候选人"
+        self._safe_after(
+            self._apply_batch_match_progress,
+            current,
+            total,
+            candidate_name,
+        )
+
+    def _apply_batch_match_progress(
+        self, current: int, total: int, candidate_name: str
+    ) -> None:
+        if self._batch_match_cancel_event.is_set():
+            return
+        self.batch_match_widget.set_progress(current, total, candidate_name)
+        self._set_status(
+            "批量匹配进行中：{}/{}，当前处理 {}".format(
+                current,
+                total,
+                candidate_name,
+            )
+        )
+
+    def _on_cancel_batch_match(self):
+        """Request soft cancellation for the current batch match."""
+        if not (self._batch_match_thread and self._batch_match_thread.is_alive()):
+            return
+        self._batch_match_cancel_event.set()
+        self.batch_match_widget.info_label.configure(
+            text="已请求取消，等待当前候选人处理结束..."
+        )
+        self._set_status("正在取消批量匹配...")
+
     def _on_batch_match_complete(
         self,
+        excel_path: str,
         results: list,
         summary_text: str,
         error: Optional[str],
@@ -986,13 +1049,97 @@ class MainWindow(ctk.CTk):
         """批量匹配完成回调。"""
         self.batch_match_widget.set_running(False)
         if error:
+            if "用户已取消批量匹配" in error:
+                self._set_status("批量匹配已取消")
+                self.batch_match_widget.set_results("任务已取消")
+                return
             messagebox.showerror("批量匹配失败", error)
             self._set_status("批量匹配失败")
-            self.batch_match_widget.set_results([], "任务失败：{}".format(error))
+            self.batch_match_widget.set_results("任务失败：{}".format(error))
             return
 
-        self.batch_match_widget.set_results(results, summary_text)
+        self._current_candidate_excel_path = excel_path
+        self.batch_match_widget.set_excel_file(
+            excel_path,
+            self.candidate_excel_service.count_matchable_candidates(excel_path),
+        )
+        self.batch_match_widget.set_results(summary_text)
         self._set_status("批量匹配完成")
+
+    def _on_import_candidate_excel(self):
+        file_path = filedialog.askopenfilename(
+            title="选择候选人 Excel",
+            filetypes=[("Excel 文件", "*.xlsx")],
+            initialdir=os.path.join(os.getcwd(), "exports", "candidates"),
+        )
+        if not file_path:
+            return
+
+        records = self.candidate_excel_service.load_candidates(file_path)
+        candidate_payload = self._build_candidate_excel_payloads(records)
+        summary = "已导入 Excel：{}\n共 {} 位候选人。".format(
+            file_path, len(candidate_payload)
+        )
+        self._current_candidate_excel_path = file_path
+        self.candidate_library_widget.set_library_candidates(summary)
+        self.candidate_library_widget.set_excel_file(file_path)
+        self.batch_match_widget.set_excel_file(
+            file_path,
+            self.candidate_excel_service.count_matchable_candidates(file_path),
+        )
+        self.batch_match_widget.set_results(summary)
+        self._set_status("已导入候选人 Excel")
+
+    def _on_open_candidate_excel(self):
+        file_path = (
+            self.candidate_library_widget.get_excel_file()
+            or self.batch_match_widget.get_excel_file()
+        )
+        if not file_path:
+            messagebox.showwarning("提示", "当前没有可打开的 Excel 文件")
+            return
+        if not os.path.exists(file_path):
+            messagebox.showwarning("提示", "Excel 文件不存在：{}".format(file_path))
+            return
+        os.startfile(file_path)
+
+    def _on_open_candidate_excel_dir(self):
+        file_path = (
+            self.candidate_library_widget.get_excel_file()
+            or self.batch_match_widget.get_excel_file()
+        )
+        if not file_path:
+            messagebox.showwarning("提示", "当前没有可打开目录的 Excel 文件")
+            return
+        directory = os.path.dirname(file_path)
+        if not directory or not os.path.exists(directory):
+            messagebox.showwarning("提示", "Excel 文件目录不存在：{}".format(directory))
+            return
+        os.startfile(directory)
+
+    def _build_candidate_excel_payloads(self, records: list) -> list:
+        payloads = []
+        for record in records:
+            payloads.append(
+                {
+                    "candidate_id": str(record.row_index),
+                    "name": record.name,
+                    "current_title": record.current_title,
+                    "current_company": record.current_company,
+                    "city": record.city,
+                    "work_years": record.work_years,
+                    "education": record.education,
+                    "profile_url": record.profile_url,
+                    "resume_text": record.resume_text,
+                    "resume_summary": record.resume_text[:120],
+                    "keyword": record.source_keyword,
+                    "capture_status": record.capture_status,
+                    "capture_status_label": record.capture_status,
+                    "last_source_at": record.captured_at,
+                    "last_enriched_at": record.captured_at,
+                }
+            )
+        return payloads
 
     def _update_company_list(self):
         """更新岗位分析的公司调研列表。"""
@@ -1038,7 +1185,7 @@ class MainWindow(ctk.CTk):
         self.resume_match_widget.update_job_list(job_list, job_data_map)
 
     def _update_candidate_job_list(self, selected_record=None):
-        """更新候选人库的岗位来源列表。"""
+        """更新候选人抓取页的岗位来源列表。"""
         records = self.job_history_manager.get_all()
         if not records:
             self._candidate_job_map = {"请先分析岗位": {}}
@@ -1165,7 +1312,7 @@ class MainWindow(ctk.CTk):
                 list(candidate_map.keys()), candidate_map
             )
             self.candidate_library_widget.set_selected_job(label)
-            self.tabview.set("候选人库")
+            self.tabview.set("候选人抓取")
 
         if hasattr(self, "batch_match_widget"):
             self.batch_match_widget.update_job_options(

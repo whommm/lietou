@@ -8,19 +8,6 @@ import sys
 import os
 import logging
 
-# 配置日志
-LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
-os.makedirs(LOG_DIR, exist_ok=True)
-
-logging.basicConfig(
-    level=logging.WARNING,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.FileHandler(os.path.join(LOG_DIR, "error.log"), encoding="utf-8"),
-        logging.StreamHandler(),
-    ],
-)
-
 
 def _global_exception_handler(exc_type, exc_value, exc_traceback):
     """全局异常处理，防止未捕获异常导致闪退"""
@@ -52,6 +39,19 @@ if getattr(sys, "frozen", False):
     BASE_DIR = os.path.dirname(sys.executable)
 else:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# 配置日志
+LOG_DIR = os.path.join(BASE_DIR, "logs")
+os.makedirs(LOG_DIR, exist_ok=True)
+
+logging.basicConfig(
+    level=logging.WARNING,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.FileHandler(os.path.join(LOG_DIR, "error.log"), encoding="utf-8"),
+        logging.StreamHandler(),
+    ],
+)
 
 sys.path.insert(0, BASE_DIR)
 
