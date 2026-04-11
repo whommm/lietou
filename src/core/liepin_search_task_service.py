@@ -1,5 +1,6 @@
 """Persist candidates from the current Liepin result page."""
 
+import logging
 from dataclasses import dataclass, field
 from typing import List
 
@@ -8,6 +9,8 @@ from .liepin_resume_extractor import LiepinResumeExtractionError, LiepinResumeEx
 from .liepin_search_service import LiepinSearchCandidate, LiepinSearchService
 from .search_task_repository import SearchTaskRepository
 from ..models import SearchTask
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -60,8 +63,7 @@ class LiepinSearchTaskService:
             summary.excel_path = self.candidate_excel_service.create_workbook(
                 task.task_name or "候选人"
             )
-            result_page = self.search_service.ensure_result_page()
-
+            logger.warning("[run_task] task=%s max_pages=%s max_candidates=%s", task.id, task.max_pages, task.max_candidates)
             for page_number in range(1, max(1, task.max_pages) + 1):
                 self.task_repository.update_status(
                     task.id,
@@ -70,9 +72,11 @@ class LiepinSearchTaskService:
                 )
                 candidates = self.search_service.extract_current_page_candidates()
                 summary.pages_processed += 1
+                logger.warning("[run_task] page=%s extracted_candidates=%s", page_number, len(candidates))
 
                 for rank_index, candidate_summary in enumerate(candidates, start=1):
                     if summary.sourced_candidate_count >= task.max_candidates:
+                        logger.warning("[run_task] reached max_candidates=%s, stopping", task.max_candidates)
                         break
                     self._process_candidate(
                         task,
@@ -81,15 +85,22 @@ class LiepinSearchTaskService:
                         page_number,
                         rank_index,
                         summary,
-                        result_page,
+                        None,
                     )
 
                 if summary.sourced_candidate_count >= task.max_candidates:
                     break
                 if page_number >= max(1, task.max_pages):
                     break
-                if not self.search_service.go_to_next_result_page(result_page):
+                logger.warning("[run_task] attempting to go to next page from page=%s", page_number)
+                logger.warning("[run_task] about to go to next page from page=%s", page_number)
+                if not self.search_service.go_to_next_result_page():
+                    logger.warning("[run_task] go_to_next_result_page returned False, stopping pagination")
                     break
+                logger.warning("[run_task] next page navigation succeeded, ensuring result page")
+                # Refresh page reference after navigation and validate still on search page
+                self.search_service.ensure_result_page()
+                logger.warning("[run_task] result page ensured after navigation")
 
             self.task_repository.update_status(
                 task.id,
@@ -103,8 +114,10 @@ class LiepinSearchTaskService:
                 ),
                 mark_finished=True,
             )
+            logger.warning("[run_task] completed pages=%s sourced=%s enriched=%s partial=%s failed=%s", summary.pages_processed, summary.sourced_candidate_count, summary.enriched_candidate_count, summary.partial_candidate_count, summary.failed_candidate_count)
             return summary
         except Exception as exc:
+            logger.exception("[run_task] task failed")
             self.task_repository.update_status(
                 task.id,
                 "failed",
@@ -147,13 +160,20 @@ class LiepinSearchTaskService:
         summary: SearchTaskExecutionSummary,
         result_page,
     ) -> None:
-        row_index = self._save_candidate_summary(
-            candidate_summary,
-            keyword,
-            page_number,
-            rank_index,
-            summary,
-        )
+        import time
+        start_time = time.time()
+        try:
+            row_index = self._save_candidate_summary(
+                candidate_summary,
+                keyword,
+                page_number,
+                rank_index,
+                summary,
+            )
+        except Exception as exc:
+            logger.error("[_process_candidate] save_candidate_summary failed: %s", exc)
+            summary.failed_candidate_count += 1
+            return
         summary.sourced_candidate_count += 1
 
         self.task_repository.update_status(
@@ -163,18 +183,19 @@ class LiepinSearchTaskService:
                 candidate_summary.name or candidate_summary.profile_url or rank_index
             ),
         )
+
         try:
 
             def _extract(page):
                 detail_page = self.search_service.open_candidate_detail(
-                    result_page, candidate_summary
+                    page, candidate_summary
                 )
                 try:
                     return self.resume_extractor.extract_candidate(
                         detail_page, candidate_summary
                     )
                 finally:
-                    self.search_service.close_detail_page(detail_page, result_page)
+                    self.search_service.close_detail_page(detail_page, page)
 
             browser_manager = self.search_service.browser_manager
             if hasattr(browser_manager, "run_with_page"):
@@ -183,27 +204,37 @@ class LiepinSearchTaskService:
                 page = browser_manager.ensure_page()
                 candidate = _extract(page)
             resume_text = (candidate.resume_text or "").strip()
-            capture_status = (
-                self.candidate_excel_service.CAPTURE_STATUS_SUCCESS
-                if resume_text
-                else self.candidate_excel_service.CAPTURE_STATUS_PARTIAL
-            )
-            self.candidate_excel_service.update_candidate_detail(
-                summary.excel_path,
-                row_index,
-                resume_text,
-                capture_status,
-            )
-            summary.enriched_candidate_count += 1
-            if capture_status == self.candidate_excel_service.CAPTURE_STATUS_PARTIAL:
+            if resume_text:
+                capture_status = self.candidate_excel_service.CAPTURE_STATUS_SUCCESS
+                self.candidate_excel_service.update_candidate_detail(
+                    summary.excel_path,
+                    row_index,
+                    resume_text,
+                    capture_status,
+                )
+                summary.enriched_candidate_count += 1
+            else:
+                capture_status = self.candidate_excel_service.CAPTURE_STATUS_PARTIAL
+                self.candidate_excel_service.update_candidate_detail(
+                    summary.excel_path,
+                    row_index,
+                    "",
+                    capture_status,
+                )
                 summary.partial_candidate_count += 1
+            logger.warning("[_process_candidate] rank=%s name=%s elapsed=%.2fs status=%s", rank_index, candidate_summary.name, time.time() - start_time, capture_status)
         except Exception as exc:
-            self.candidate_excel_service.update_candidate_detail(
-                summary.excel_path,
-                row_index,
-                "",
-                self.candidate_excel_service.CAPTURE_STATUS_FAILED,
-            )
+            logger.exception("[_process_candidate] rank=%s name=%s failed", rank_index, candidate_summary.name)
+            try:
+                self.candidate_excel_service.update_candidate_detail(
+                    summary.excel_path,
+                    row_index,
+                    "",
+                    self.candidate_excel_service.CAPTURE_STATUS_FAILED,
+                )
+            except Exception:
+                # Excel 被占用等写入失败不应拖垮整个任务
+                pass
             summary.partial_candidate_count += 1
             summary.failed_candidate_count += 1
             failed_identifier = (

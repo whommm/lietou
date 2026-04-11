@@ -1,3 +1,3 @@
 """UI 模块"""
 
-from .main_window import MainWindow
+from .main_window import MainWindow as MainWindow

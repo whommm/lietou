@@ -55,7 +55,7 @@ logging.basicConfig(
 
 sys.path.insert(0, BASE_DIR)
 
-from src.ui.main_window import MainWindow
+from src.ui.main_window import MainWindow  # noqa: E402
 
 
 def main():

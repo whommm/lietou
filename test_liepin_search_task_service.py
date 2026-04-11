@@ -45,8 +45,7 @@ class FakeSearchService:
     def ensure_result_page(self):
         return self.result_page
 
-    def go_to_next_result_page(self, page):
-        assert page is self.result_page
+    def go_to_next_result_page(self):
         self.next_page_calls += 1
         if not self.next_page_results:
             return False

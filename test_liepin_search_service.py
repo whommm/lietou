@@ -86,9 +86,16 @@ class DummyBrowserManager:
     def ensure_page(self):
         return FakePage()
 
+    def new_page(self):
+        return FakePage()
+
     @staticmethod
     def _pick_best_page(pages, current_page=None):
         return pages[-1] if pages else current_page
+
+    @staticmethod
+    def set_active_page(page):
+        pass
 
 
 class FakeInputLocator:
@@ -155,7 +162,7 @@ class SearchServiceStub(LiepinSearchService):
         self._cards = cards
 
     def _locate_result_cards(self, page):
-        return self._cards
+        return self._cards, "test-selector"
 
 
 class BrowserManagerWithRun:
@@ -164,6 +171,9 @@ class BrowserManagerWithRun:
 
     def run_with_page(self, func):
         return func(self.page)
+
+    def new_page(self):
+        return self.page
 
     def export_debug_snapshot(self, reason):
         return ""

@@ -5,12 +5,16 @@ from __future__ import annotations
 import os
 import re
 from datetime import datetime
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, List, Optional
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 
 from ..models import CandidateExcelRecord
+
+
+class CandidateExcelError(Exception):
+    """Raised when Excel read/write fails."""
 
 
 class CandidateExcelService:
@@ -96,15 +100,24 @@ class CandidateExcelService:
         return path
 
     def append_candidate_row(self, file_path: str, row_data: Dict[str, object]) -> int:
-        workbook = load_workbook(file_path)
-        sheet = workbook[self.SHEET_NAME]
-        row_index = sheet.max_row + 1
-        values = [row_data.get(header, "") for header in self.HEADERS]
-        sheet.append(values)
-        self._apply_row_style(sheet, row_index)
-        workbook.save(file_path)
-        workbook.close()
-        return row_index
+        try:
+            workbook = load_workbook(file_path)
+            sheet = workbook[self.SHEET_NAME]
+            row_index = sheet.max_row + 1
+            values = [row_data.get(header, "") for header in self.HEADERS]
+            sheet.append(values)
+            self._apply_row_style(sheet, row_index)
+            workbook.save(file_path)
+            workbook.close()
+            return row_index
+        except PermissionError as exc:
+            raise CandidateExcelError(
+                "Excel 文件被占用，请关闭后重试：{}".format(file_path)
+            ) from exc
+        except Exception as exc:
+            raise CandidateExcelError(
+                "写入 Excel 失败：{}".format(exc)
+            ) from exc
 
     def update_candidate_detail(
         self,
@@ -113,16 +126,25 @@ class CandidateExcelService:
         resume_text: str,
         capture_status: str,
     ) -> None:
-        workbook = load_workbook(file_path)
-        sheet = workbook[self.SHEET_NAME]
-        sheet.cell(row=row_index, column=self.HEADER_INDEX["简历详情"]).value = (
-            resume_text or ""
-        )
-        sheet.cell(
-            row=row_index, column=self.HEADER_INDEX["简历抓取状态"]
-        ).value = capture_status
-        workbook.save(file_path)
-        workbook.close()
+        try:
+            workbook = load_workbook(file_path)
+            sheet = workbook[self.SHEET_NAME]
+            sheet.cell(row=row_index, column=self.HEADER_INDEX["简历详情"]).value = (
+                resume_text or ""
+            )
+            sheet.cell(
+                row=row_index, column=self.HEADER_INDEX["简历抓取状态"]
+            ).value = capture_status
+            workbook.save(file_path)
+            workbook.close()
+        except PermissionError as exc:
+            raise CandidateExcelError(
+                "Excel 文件被占用，请关闭后重试：{}".format(file_path)
+            ) from exc
+        except Exception as exc:
+            raise CandidateExcelError(
+                "更新 Excel 失败：{}".format(exc)
+            ) from exc
 
     def write_match_result(
         self,
@@ -132,17 +154,26 @@ class CandidateExcelService:
         detail: str,
         matched_at: Optional[str] = None,
     ) -> None:
-        workbook = load_workbook(file_path)
-        sheet = workbook[self.SHEET_NAME]
-        sheet.cell(row=row_index, column=self.HEADER_INDEX["匹配度分数"]).value = score
-        sheet.cell(row=row_index, column=self.HEADER_INDEX["匹配详情"]).value = (
-            detail or ""
-        )
-        sheet.cell(row=row_index, column=self.HEADER_INDEX["匹配时间"]).value = (
-            matched_at or self.now_text()
-        )
-        workbook.save(file_path)
-        workbook.close()
+        try:
+            workbook = load_workbook(file_path)
+            sheet = workbook[self.SHEET_NAME]
+            sheet.cell(row=row_index, column=self.HEADER_INDEX["匹配度分数"]).value = score
+            sheet.cell(row=row_index, column=self.HEADER_INDEX["匹配详情"]).value = (
+                detail or ""
+            )
+            sheet.cell(row=row_index, column=self.HEADER_INDEX["匹配时间"]).value = (
+                matched_at or self.now_text()
+            )
+            workbook.save(file_path)
+            workbook.close()
+        except PermissionError as exc:
+            raise CandidateExcelError(
+                "Excel 文件被占用，请关闭后重试：{}".format(file_path)
+            ) from exc
+        except Exception as exc:
+            raise CandidateExcelError(
+                "回写匹配结果到 Excel 失败：{}".format(exc)
+            ) from exc
 
     def load_candidates(self, file_path: str) -> List[CandidateExcelRecord]:
         workbook = load_workbook(file_path)

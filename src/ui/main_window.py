@@ -906,6 +906,7 @@ class MainWindow(ctk.CTk):
         self._current_candidate_excel_path = excel_path
         self.candidate_library_widget.set_task_result(task_id, summary_text)
         self.candidate_library_widget.set_excel_file(excel_path)
+        self.candidate_library_widget.set_candidate_records(candidates)
         self.batch_match_widget.set_excel_file(
             excel_path,
             self.candidate_excel_service.count_matchable_candidates(excel_path),
@@ -1083,6 +1084,7 @@ class MainWindow(ctk.CTk):
         self._current_candidate_excel_path = file_path
         self.candidate_library_widget.set_library_candidates(summary)
         self.candidate_library_widget.set_excel_file(file_path)
+        self.candidate_library_widget.set_candidate_records(candidate_payload)
         self.batch_match_widget.set_excel_file(
             file_path,
             self.candidate_excel_service.count_matchable_candidates(file_path),

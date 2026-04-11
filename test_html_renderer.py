@@ -3,12 +3,6 @@
 import sys
 import os
 
-# 设置Windows控制台编码
-if sys.platform == 'win32':
-    import io
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
-
 # 确保能正确导入src模块
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
@@ -37,7 +31,13 @@ def test_imports():
         return False
 
     try:
-        from src.ui.html_renderer import HtmlRenderer
+        import importlib.util
+
+        spec = importlib.util.find_spec("src.ui.html_renderer")
+        if spec is None:
+            print("  [FAIL] HtmlRenderer 导入失败: 模块不存在")
+            return False
+        from src.ui.html_renderer import HtmlRenderer  # noqa: F401
         print("  [OK] HtmlRenderer 导入成功")
     except ImportError as e:
         print(f"  [FAIL] HtmlRenderer 导入失败: {e}")
@@ -51,7 +51,7 @@ def test_imports():
         return False
 
     print("\n所有依赖导入成功!")
-    return True
+    assert True
 
 
 def test_markdown_conversion():
@@ -99,7 +99,7 @@ def hello():
         print("-" * 40)
         print(html[:500])
         print("-" * 40)
-        return True
+        assert True
     except Exception as e:
         print(f"  [FAIL] Markdown转换失败: {e}")
         return False
@@ -107,6 +107,9 @@ def hello():
 
 def test_gui():
     """测试GUI显示（需要手动验证）"""
+    import pytest
+    pytest.skip("GUI test requires manual interaction")
+
     print("\n" + "=" * 50)
     print("测试3: GUI显示测试")
     print("=" * 50)
@@ -118,7 +121,6 @@ def test_gui():
 
     import customtkinter as ctk
     from src.ui.html_renderer import HtmlRenderer
-    from src.ui.themes import LIGHT_CSS
 
     # 创建测试窗口
     ctk.set_appearance_mode("light")

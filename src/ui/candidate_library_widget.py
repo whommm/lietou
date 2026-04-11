@@ -63,6 +63,7 @@ class CandidateLibraryWidget(ctk.CTkFrame):
         self.strategy_payload: Dict[str, List[str]] = {}
         self.task_id: str = ""
         self._excel_file_path: str = ""
+        self._candidate_records: List[Dict] = []
 
         self._setup_ui()
 
@@ -295,7 +296,8 @@ class CandidateLibraryWidget(ctk.CTkFrame):
         )
         frame.grid(row=1, column=1, padx=(6, 10), pady=(0, 10), sticky="nsew")
         frame.grid_columnconfigure(0, weight=1)
-        frame.grid_rowconfigure(4, weight=1)
+        frame.grid_rowconfigure(4, weight=0)
+        frame.grid_rowconfigure(5, weight=1)
 
         ctk.CTkLabel(
             frame,
@@ -369,6 +371,7 @@ class CandidateLibraryWidget(ctk.CTkFrame):
 
         self.info_box = ctk.CTkTextbox(
             frame,
+            height=140,
             wrap="word",
             corner_radius=18,
             border_width=1,
@@ -378,11 +381,25 @@ class CandidateLibraryWidget(ctk.CTkFrame):
             scrollbar_button_color=colors["accent"],
             scrollbar_button_hover_color=colors["accent_hover"],
         )
-        self.info_box.grid(row=4, column=0, padx=16, pady=(0, 10), sticky="nsew")
+        self.info_box.grid(row=4, column=0, padx=16, pady=(0, 10), sticky="ew")
         self.info_box.insert(
             "1.0",
             "未创建搜索任务。\n抓取完成后，这里会显示处理页数、成功数、失败数和文件位置。",
         )
+
+        self.candidate_list_box = ctk.CTkTextbox(
+            frame,
+            wrap="word",
+            corner_radius=18,
+            border_width=1,
+            border_color=colors["border"],
+            fg_color=colors["panel_alt"],
+            text_color=colors["text"],
+            scrollbar_button_color=colors["accent"],
+            scrollbar_button_hover_color=colors["accent_hover"],
+        )
+        self.candidate_list_box.grid(row=5, column=0, padx=16, pady=(0, 10), sticky="nsew")
+        self.candidate_list_box.insert("1.0", "暂无候选人记录。")
 
         self.info_label = ctk.CTkLabel(
             frame,
@@ -392,7 +409,7 @@ class CandidateLibraryWidget(ctk.CTkFrame):
             justify="left",
             wraplength=420,
         )
-        self.info_label.grid(row=5, column=0, padx=16, pady=(0, 16), sticky="w")
+        self.info_label.grid(row=6, column=0, padx=16, pady=(0, 16), sticky="w")
 
     def _on_pick_job_click(self):
         if self.on_pick_job_history:
@@ -569,3 +586,28 @@ class CandidateLibraryWidget(ctk.CTkFrame):
             ]
             parsed[target_key] = values
         return parsed
+
+    def set_candidate_records(self, records: List[Dict]):
+        self._candidate_records = records or []
+        self._refresh_candidate_list()
+
+    def _refresh_candidate_list(self):
+        if not self._candidate_records:
+            self.candidate_list_box.delete("1.0", "end")
+            self.candidate_list_box.insert("1.0", "暂无候选人记录。")
+            return
+        lines = [
+            "候选人列表（共 {} 位）：".format(len(self._candidate_records))
+        ]
+        for rec in self._candidate_records:
+            status = rec.get("capture_status", "未知")
+            lines.append(
+                "- {} | {} @ {} [{}]".format(
+                    rec.get("name") or "未命名",
+                    rec.get("current_title") or "",
+                    rec.get("current_company") or "",
+                    status,
+                )
+            )
+        self.candidate_list_box.delete("1.0", "end")
+        self.candidate_list_box.insert("1.0", "\n".join(lines))

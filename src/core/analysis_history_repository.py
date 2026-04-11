@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, List, Optional
 from .database import DatabaseManager
 
 if TYPE_CHECKING:
-    from .history import HistoryRecord
+    pass
 
 
 class AnalysisHistoryRepository:

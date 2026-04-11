@@ -273,6 +273,11 @@ class LiepinBrowserManager:
             "user_data_dir": profile_dir,
             "headless": self.config_manager.config.liepin_browser_headless,
             "viewport": {"width": 1440, "height": 960},
+            "args": [
+                "--start-maximized",
+                "--window-size=1920,1080",
+                "--force-device-scale-factor=1",
+            ],
         }
         launch_kwargs = dict(default_launch_kwargs)
 
@@ -319,6 +324,12 @@ class LiepinBrowserManager:
                 self._context = browser_type.launch_persistent_context(
                     **default_launch_kwargs
                 )
+        # Auto-dismiss dialogs so accidental clicks on filter widgets don't hang the worker
+        try:
+            self._context.on("dialog", lambda dialog: dialog.dismiss())
+        except Exception:
+            pass
+
         actual_browser = (
             executable_path or launch_kwargs.get("channel") or "playwright-chromium"
         )
@@ -380,6 +391,20 @@ class LiepinBrowserManager:
         """Return an active page, launching the browser if needed."""
         return self._run_on_worker(self._ensure_page_locked)
 
+    def new_page(self) -> Page:
+        """Create a new page on the dedicated worker thread."""
+        def _new_page_locked() -> Page:
+            if self._context is None:
+                self._launch_locked()
+            page = self._context.new_page()
+            self._page = page
+            return page
+        return self._run_on_worker(_new_page_locked)
+
+    def set_active_page(self, page: Page) -> None:
+        """Update the internal active page pointer (useful after closing transient tabs)."""
+        self._page = page
+
     def run_with_page(self, func: Callable[..., T], *args, **kwargs) -> T:
         """Execute a callback with the active page on the worker thread."""
 
@@ -390,7 +415,11 @@ class LiepinBrowserManager:
         return self._run_on_worker(_invoke)
 
     def export_debug_snapshot(self, reason: str = "manual") -> str:
-        """Export the current page structure for selector debugging."""
+        """Export the current page structure for selector debugging.
+        
+        Enhanced version includes pagination info, candidate cards, viewport details,
+        and error diagnostics to help troubleshoot page navigation issues.
+        """
 
         def _export(page):
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -403,8 +432,10 @@ class LiepinBrowserManager:
             html = page.content()
             title = page.title()
             url = page.url or ""
-            interactive = page.evaluate(
-                """
+            
+            # Enhanced diagnostics data
+            diagnostics = page.evaluate(
+                r"""
                 () => {
                   const collect = (selector) => Array.from(document.querySelectorAll(selector)).slice(0, 80).map((el, index) => ({
                     index,
@@ -420,11 +451,86 @@ class LiepinBrowserManager:
                     rectTop: Math.round((el.getBoundingClientRect && el.getBoundingClientRect().top) || 0),
                     rectLeft: Math.round((el.getBoundingClientRect && el.getBoundingClientRect().left) || 0),
                   }));
+                  
+                  // Pagination analysis
+                  const paginationInfo = (() => {
+                    const pagination = document.querySelector('.ant-pagination, .pagination, [class*="pagination"]');
+                    if (!pagination) return { found: false };
+                    
+                    const items = Array.from(pagination.querySelectorAll('li, .page-item, [class*="page"]'));
+                    const activeItem = pagination.querySelector('.ant-pagination-item-active, .active, .current');
+                    const nextBtn = pagination.querySelector('.ant-pagination-next, [title="下一页"], .next-page');
+                    const prevBtn = pagination.querySelector('.ant-pagination-prev, [title="上一页"], .prev-page');
+                    
+                    return {
+                      found: true,
+                      totalItems: items.length,
+                      activePage: activeItem ? (activeItem.innerText || activeItem.textContent || '').trim() : 'N/A',
+                      hasNext: !!nextBtn && !nextBtn.classList.contains('ant-pagination-disabled'),
+                      hasPrev: !!prevBtn && !prevBtn.classList.contains('ant-pagination-disabled'),
+                      paginationHTML: pagination.outerHTML.slice(0, 2000),
+                    };
+                  })();
+                  
+                  // Candidate cards analysis
+                  const candidateInfo = (() => {
+                    const selectors = [
+                      '[data-selector="jobseeker-item"]',
+                      '.sojob-item-main',
+                      '.candidate-card',
+                      '.resume-list-item',
+                      '.ant-list-item',
+                      '.resume-item',
+                      '[class*="resume-item"]',
+                      '[class*="candidate"]',
+                    ];
+                    
+                    for (const selector of selectors) {
+                      const cards = document.querySelectorAll(selector);
+                      if (cards.length > 0) {
+                        return {
+                          selector: selector,
+                          count: cards.length,
+                          firstCardHTML: cards[0] ? cards[0].outerHTML.slice(0, 1000) : 'N/A',
+                          visibleCards: Array.from(cards).filter(c => {
+                            const rect = c.getBoundingClientRect();
+                            return rect.top >= 0 && rect.top <= window.innerHeight;
+                          }).length,
+                        };
+                      }
+                    }
+                    return { found: false, count: 0 };
+                  })();
+                  
+                  // Viewport and scroll info
+                  const viewportInfo = {
+                    width: window.innerWidth,
+                    height: window.innerHeight,
+                    scrollX: window.scrollX,
+                    scrollY: window.scrollY,
+                    documentHeight: document.documentElement.scrollHeight,
+                  };
+                  
+                  // Check for error messages or loading states
+                  const errorInfo = (() => {
+                    const errorElements = document.querySelectorAll('.ant-empty, .error-message, [class*="error"], [class*="empty"]');
+                    const loadingElements = document.querySelectorAll('.ant-spin, .loading, [class*="loading"]');
+                    return {
+                      errorCount: errorElements.length,
+                      errors: Array.from(errorElements).slice(0, 3).map(e => e.innerText.slice(0, 200)),
+                      loadingCount: loadingElements.length,
+                    };
+                  })();
+                  
                   return {
                     inputs: collect('input, textarea, [contenteditable="true"]'),
                     buttons: collect('button, [role="button"], input[type="button"], input[type="submit"]'),
                     forms: collect('form'),
                     iframes: collect('iframe'),
+                    pagination: paginationInfo,
+                    candidates: candidateInfo,
+                    viewport: viewportInfo,
+                    errors: errorInfo,
                   };
                 }
                 """
@@ -434,11 +540,60 @@ class LiepinBrowserManager:
                 html_file.write(html)
 
             with open(meta_path, "w", encoding="utf-8") as meta_file:
+                # Basic info
                 meta_file.write("URL: {}\n".format(url))
-                meta_file.write("TITLE: {}\n\n".format(title))
+                meta_file.write("TITLE: {}\n".format(title))
+                meta_file.write("TIMESTAMP: {}\n".format(timestamp))
+                meta_file.write("REASON: {}\n\n".format(reason))
+                
+                # Viewport info
+                viewport = diagnostics.get('viewport', {})
+                meta_file.write("[VIEWPORT]\n")
+                meta_file.write("Window Size: {}x{}\n".format(viewport.get('width', 'N/A'), viewport.get('height', 'N/A')))
+                meta_file.write("Scroll Position: x={}, y={}\n".format(viewport.get('scrollX', 'N/A'), viewport.get('scrollY', 'N/A')))
+                meta_file.write("Document Height: {}\n\n".format(viewport.get('documentHeight', 'N/A')))
+                
+                # Pagination info
+                pagination = diagnostics.get('pagination', {})
+                meta_file.write("[PAGINATION]\n")
+                if pagination.get('found'):
+                    meta_file.write("Status: FOUND\n")
+                    meta_file.write("Total Items: {}\n".format(pagination.get('totalItems', 'N/A')))
+                    meta_file.write("Current Page: {}\n".format(pagination.get('activePage', 'N/A')))
+                    meta_file.write("Has Next Page: {}\n".format(pagination.get('hasNext', 'N/A')))
+                    meta_file.write("Has Prev Page: {}\n".format(pagination.get('hasPrev', 'N/A')))
+                    meta_file.write("HTML Snippet:\n{}\n".format(pagination.get('paginationHTML', 'N/A')))
+                else:
+                    meta_file.write("Status: NOT FOUND\n")
+                meta_file.write("\n")
+                
+                # Candidates info
+                candidates = diagnostics.get('candidates', {})
+                meta_file.write("[CANDIDATES]\n")
+                if candidates.get('found') is not False:
+                    meta_file.write("Status: FOUND\n")
+                    meta_file.write("Selector Used: {}\n".format(candidates.get('selector', 'N/A')))
+                    meta_file.write("Total Count: {}\n".format(candidates.get('count', 'N/A')))
+                    meta_file.write("Visible in Viewport: {}\n".format(candidates.get('visibleCards', 'N/A')))
+                    meta_file.write("First Card HTML:\n{}\n".format(candidates.get('firstCardHTML', 'N/A')))
+                else:
+                    meta_file.write("Status: NOT FOUND\n")
+                meta_file.write("\n")
+                
+                # Error/Loading states
+                errors = diagnostics.get('errors', {})
+                meta_file.write("[ERRORS & LOADING]\n")
+                meta_file.write("Error Elements: {}\n".format(errors.get('errorCount', 0)))
+                if errors.get('errors'):
+                    for i, err in enumerate(errors.get('errors', [])):
+                        meta_file.write("  Error {}: {}\n".format(i+1, err))
+                meta_file.write("Loading Elements: {}\n".format(errors.get('loadingCount', 0)))
+                meta_file.write("\n")
+                
+                # Standard interactive elements
                 for section in ("inputs", "buttons", "forms", "iframes"):
                     meta_file.write("[{}]\n".format(section.upper()))
-                    for item in interactive.get(section, []):
+                    for item in diagnostics.get(section, []):
                         meta_file.write(
                             "{tag} | top={rectTop} | left={rectLeft} | id={id} | name={name} | type={type} | placeholder={placeholder} | role={role} | href={href} | class={className} | text={text}\n".format(
                                 **item
@@ -455,7 +610,7 @@ class LiepinBrowserManager:
 
         def _open_home_locked():
             page = self._ensure_page_locked()
-            page.goto(self.LOGIN_URL, wait_until="domcontentloaded")
+            page.goto(self.LOGIN_URL, wait_until="domcontentloaded", timeout=15000)
             return self._get_state_locked()
 
         return self._run_on_worker(_open_home_locked)
@@ -468,7 +623,7 @@ class LiepinBrowserManager:
             current_url = page.url or ""
             if not self._is_search_page_url(current_url):
                 try:
-                    page.goto(self.SEARCH_URL, wait_until="domcontentloaded")
+                    page.goto(self.SEARCH_URL, wait_until="domcontentloaded", timeout=15000)
                 except Exception:
                     # Liepin may redirect immediately after navigation; as long as
                     # we land on a valid search page, treat it as success.

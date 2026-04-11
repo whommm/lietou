@@ -1,8 +1,8 @@
 """Candidate detail extraction and resume normalization for Liepin."""
 
 import json
-from dataclasses import asdict
-from typing import Dict, List, Optional
+import logging
+from typing import Dict, List
 
 from .liepin_search_service import LiepinSearchCandidate
 from ..models import Candidate
@@ -13,6 +13,8 @@ try:
 except ImportError:  # pragma: no cover
     Error = Exception
     Page = None
+
+logger = logging.getLogger(__name__)
 
 
 class LiepinResumeExtractionError(Exception):
@@ -26,17 +28,21 @@ class LiepinResumeExtractor:
         ".resume-header",
         ".resume-info",
         ".basic-info",
+        ".base-info",
+        ".candidate-info",
         "body",
     ]
     SUMMARY_SELECTORS = [
         ".self-evaluation",
         ".summary-section",
         ".resume-summary",
+        ".summary-info",
     ]
     EXPERIENCE_SELECTORS = [
         ".work-experience",
         ".resume-work",
         ".work-section",
+        ".experience-section",
     ]
     PROJECT_SELECTORS = [
         ".project-experience",
@@ -52,6 +58,7 @@ class LiepinResumeExtractor:
         ".skill-section",
         ".resume-extra",
         ".additional-info",
+        ".skill-info",
     ]
 
     def extract_candidate(
@@ -97,6 +104,12 @@ class LiepinResumeExtractor:
             "extra": self._extract_first_section(page, self.EXTRA_SELECTORS),
         }
         if not any(sections.values()):
+            # Fallback: extract full body text as basic_info so we don't lose everything
+            logger.warning("liepin_resume_extractor: structured selectors returned empty, falling back to body text")
+            fallback = self._extract_first_section(page, ["body"])
+            if fallback:
+                sections["basic_info"] = fallback
+                return sections
             raise LiepinResumeExtractionError("未提取到简历详情内容，请检查详情页结构")
         return sections
 
@@ -104,8 +117,8 @@ class LiepinResumeExtractor:
         for selector in selectors:
             try:
                 locator = page.locator(selector).first
-                if locator.is_visible(timeout=1500):
-                    text = locator.inner_text(timeout=3000)
+                if locator.is_visible(timeout=500):
+                    text = locator.inner_text(timeout=1500)
                     lines = [line.strip() for line in text.splitlines() if line.strip()]
                     if lines:
                         return lines
