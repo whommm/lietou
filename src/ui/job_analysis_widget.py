@@ -420,6 +420,23 @@ class JobAnalysisWidget(ctk.CTkFrame):
         self.jd_textbox.delete("1.0", "end")
         self.jd_textbox.insert("1.0", text)
 
+    def get_selected_company(self) -> str:
+        """获取选中的公司调研项。"""
+        return self.company_display.get().strip()
+
+    def update_company_options(self, values: List[str]):
+        """更新公司调研选项。"""
+        self._company_options = values
+        if values:
+            self.set_selected_company(values[0])
+
+    def set_selected_company(self, title: str):
+        """设置当前选中的公司调研项。"""
+        self.company_display.configure(state="normal")
+        self.company_display.delete(0, "end")
+        self.company_display.insert(0, title)
+        self.company_display.configure(state="readonly")
+
     def show_loading(self):
         """显示加载状态。"""
         if self._showing_history:
