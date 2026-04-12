@@ -803,53 +803,85 @@ class MainWindow(ctk.CTk):
         self._finish_company_research(company_name, error, result)
 
     def _on_launch_liepin_browser(self):
-        """启动猎聘浏览器。"""
-        try:
-            self.liepin_browser_manager.launch()
-            state = self.liepin_browser_manager.open_search_page()
-            self.candidate_library_widget.set_browser_state(
-                "浏览器已启动并打开找简历页，用户目录：{}".format(state.profile_dir)
-            )
-            self._set_status("猎聘浏览器已启动并导航到找简历页")
-        except Exception as exc:
-            messagebox.showerror("浏览器启动失败", str(exc))
-            self._set_status("猎聘浏览器启动失败")
+        """启动猎聘浏览器（在后台线程执行，避免 UI 卡死）。"""
+        import threading
+
+        def _run():
+            try:
+                self.liepin_browser_manager.launch()
+                state = self.liepin_browser_manager.open_search_page()
+                self.after(
+                    0,
+                    lambda: self.candidate_library_widget.set_browser_state(
+                        "浏览器已启动并打开找简历页，用户目录：{}".format(state.profile_dir)
+                    ),
+                )
+                self.after(
+                    0, lambda: self._set_status("猎聘浏览器已启动并导航到找简历页")
+                )
+            except Exception as exc:
+                self.after(
+                    0, lambda exc=exc: messagebox.showerror("浏览器启动失败", str(exc))
+                )
+                self.after(0, lambda: self._set_status("猎聘浏览器启动失败"))
+
+        threading.Thread(target=_run, daemon=True).start()
 
     def _on_check_liepin_login(self):
-        """检查猎聘登录状态。"""
-        try:
-            self.liepin_browser_manager.launch()
-            state = self.liepin_browser_manager.get_state()
-            # 如果浏览器刚被重新打开，默认页面是 about:blank，此时导航到搜索页
-            # 以免用户看到空白页面。
-            if not state.current_url or state.current_url.lower() in ("about:blank", ""):
-                state = self.liepin_browser_manager.open_search_page()
-            text = (
-                "猎聘已登录，可手动搜索后执行结果页入库。"
-                if state.logged_in
-                else "猎聘未登录，请先在浏览器中手动登录。"
-            )
-            self.candidate_library_widget.set_browser_state(text)
-            self._set_status(text)
-        except Exception as exc:
-            messagebox.showerror("登录检查失败", str(exc))
-            self._set_status("猎聘登录检查失败")
+        """检查猎聘登录状态（在后台线程执行，避免 UI 卡死）。"""
+        import threading
+
+        def _run():
+            try:
+                self.liepin_browser_manager.launch()
+                state = self.liepin_browser_manager.get_state()
+                # 如果浏览器刚被重新打开，默认页面是 about:blank，此时导航到搜索页
+                # 以免用户看到空白页面。
+                if not state.current_url or state.current_url.lower() in ("about:blank", ""):
+                    state = self.liepin_browser_manager.open_search_page()
+                text = (
+                    "猎聘已登录，可手动搜索后执行结果页入库。"
+                    if state.logged_in
+                    else "猎聘未登录，请先在浏览器中手动登录。"
+                )
+                self.after(0, lambda: self.candidate_library_widget.set_browser_state(text))
+                self.after(0, lambda: self._set_status(text))
+            except Exception as exc:
+                self.after(
+                    0, lambda exc=exc: messagebox.showerror("登录检查失败", str(exc))
+                )
+                self.after(0, lambda: self._set_status("猎聘登录检查失败"))
+
+        threading.Thread(target=_run, daemon=True).start()
 
     def _on_export_liepin_debug(self):
-        """导出当前猎聘页面结构，用于真实站点选择器校准。"""
-        try:
-            self.liepin_browser_manager.launch()
-            debug_path = self.liepin_browser_manager.export_debug_snapshot(
-                "manual_debug"
-            )
-            self.candidate_library_widget.set_browser_state(
-                "已导出页面诊断文件：{}".format(debug_path)
-            )
-            self._set_status("猎聘页面诊断文件已导出")
-            messagebox.showinfo("成功", "页面诊断文件已导出:\n{}".format(debug_path))
-        except Exception as exc:
-            messagebox.showerror("导出失败", str(exc))
-            self._set_status("导出页面诊断失败")
+        """导出当前猎聘页面结构（在后台线程执行，避免 UI 卡死）。"""
+        import threading
+
+        def _run():
+            try:
+                self.liepin_browser_manager.launch()
+                debug_path = self.liepin_browser_manager.export_debug_snapshot(
+                    "manual_debug"
+                )
+                self.after(
+                    0,
+                    lambda: self.candidate_library_widget.set_browser_state(
+                        "已导出页面诊断文件：{}".format(debug_path)
+                    ),
+                )
+                self.after(0, lambda: self._set_status("猎聘页面诊断文件已导出"))
+                self.after(
+                    0,
+                    lambda: messagebox.showinfo(
+                        "成功", "页面诊断文件已导出:\n{}".format(debug_path)
+                    ),
+                )
+            except Exception as exc:
+                self.after(0, lambda exc=exc: messagebox.showerror("导出失败", str(exc)))
+                self.after(0, lambda: self._set_status("导出页面诊断失败"))
+
+        threading.Thread(target=_run, daemon=True).start()
 
     def _on_close_liepin_browser(self):
         """安全关闭猎聘浏览器，保留 worker 线程以便下次重启。"""

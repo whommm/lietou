@@ -1,6 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-PyInstaller 打包配置
+PyInstaller 打包配置 (one-directory 模式，更稳定支持 Playwright 子进程)
 使用方法: pyinstaller build.spec
 """
 
@@ -45,7 +45,6 @@ a = Analysis(
     runtime_hooks=[],
     excludes=[],
     win_no_prefer_redirects=False,
-    # win_private_assemblies removed in PyInstaller 6.0+
     cipher=block_cipher,
     noarchive=False,
 )
@@ -55,10 +54,8 @@ pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
     [],
+    exclude_binaries=True,
     name='智能岗位分析助手',
     debug=False,
     bootloader_ignore_signals=False,
@@ -73,4 +70,15 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=None,  # 可以添加图标路径，如 'assets/icon.ico'
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name='智能岗位分析助手',
 )

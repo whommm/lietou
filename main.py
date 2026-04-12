@@ -7,6 +7,7 @@
 import sys
 import os
 import logging
+import multiprocessing
 
 
 def _global_exception_handler(exc_type, exc_value, exc_traceback):
@@ -66,4 +67,5 @@ def main():
 
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
     main()

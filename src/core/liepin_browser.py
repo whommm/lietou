@@ -375,48 +375,34 @@ class LiepinBrowserManager:
         launch_kwargs = dict(default_launch_kwargs)
 
         preferred_channel = self.config_manager.config.liepin_browser_channel
-        executable_path = ""
-        detected_channel = ""
-        if getattr(sys, "frozen", False):
-            detected_channel, executable_path = self._find_system_browser_executable()
+        if preferred_channel in ("chrome", "msedge"):
+            launch_kwargs["channel"] = preferred_channel
+
         logger.warning(
-            "Liepin browser launch prepare: frozen=%s, preferred_channel=%s, detected_channel=%s, executable_path=%s, playwright_browsers_path=%s, profile_dir=%s",
+            "Liepin browser launch prepare: frozen=%s, preferred_channel=%s, playwright_browsers_path=%s, profile_dir=%s",
             getattr(sys, "frozen", False),
             preferred_channel,
-            detected_channel or "",
-            executable_path or "",
             os.environ.get("PLAYWRIGHT_BROWSERS_PATH", ""),
             profile_dir,
         )
-        if executable_path:
-            launch_kwargs["executable_path"] = executable_path
-        elif preferred_channel in ("chrome", "msedge"):
-            launch_kwargs["channel"] = preferred_channel
 
-        if executable_path:
+        try:
             logger.warning(
-                "Liepin browser launch mode: system executable (%s)",
-                executable_path,
+                "Liepin browser launch mode: playwright channel/default, launch_kwargs=%s",
+                {
+                    key: value
+                    for key, value in launch_kwargs.items()
+                    if key != "user_data_dir"
+                },
             )
             self._context = browser_type.launch_persistent_context(**launch_kwargs)
-        else:
-            try:
-                logger.warning(
-                    "Liepin browser launch mode: playwright channel/default, launch_kwargs=%s",
-                    {
-                        key: value
-                        for key, value in launch_kwargs.items()
-                        if key != "user_data_dir"
-                    },
-                )
-                self._context = browser_type.launch_persistent_context(**launch_kwargs)
-            except Exception:
-                logger.exception(
-                    "Liepin browser launch fallback triggered, retrying with pure playwright chromium"
-                )
-                self._context = browser_type.launch_persistent_context(
-                    **default_launch_kwargs
-                )
+        except Exception:
+            logger.exception(
+                "Liepin browser launch fallback triggered, retrying with pure playwright chromium"
+            )
+            self._context = browser_type.launch_persistent_context(
+                **default_launch_kwargs
+            )
         # Auto-dismiss dialogs so accidental clicks on filter widgets don't hang the worker
         try:
             self._context.on("dialog", lambda dialog: dialog.dismiss())
