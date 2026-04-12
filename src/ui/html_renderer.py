@@ -8,7 +8,7 @@ import markdown
 from tkinterweb import HtmlFrame
 
 from ..utils.html_sanitizer import HtmlSanitizer
-from .themes import DARK_CSS, LIGHT_CSS
+from .themes import LIGHT_CSS
 
 LOADING_VARIANTS = {
     "job_analysis": {
@@ -269,13 +269,13 @@ class HtmlRenderer:
 
     def _get_css(self) -> str:
         """获取当前主题的CSS。"""
-        return DARK_CSS if self.theme == "dark" else LIGHT_CSS
+        return LIGHT_CSS
 
     def _wrap_html(self, body_content: str) -> str:
         """包装完整HTML文档。"""
         css = self._get_css()
-        scrollbar_track = "#2d2d2d" if self.theme == "dark" else "#f1f1f1"
-        scrollbar_thumb = "#555" if self.theme == "dark" else "#c1c1c1"
+        scrollbar_track = "#f1f1f1"
+        scrollbar_thumb = "#c1c1c1"
         return f"""<!DOCTYPE html>
 <html>
 <head>
@@ -432,11 +432,8 @@ class HtmlRenderer:
         return self._buffer
 
     def set_theme(self, theme: str):
-        """切换主题。"""
-        if theme not in ("light", "dark"):
-            return
-
-        self.theme = theme
+        """切换主题（当前仅支持 light）。"""
+        self.theme = "light"
         if self._fallback_mode:
             self._enter_fallback_mode()
         elif self._buffer:

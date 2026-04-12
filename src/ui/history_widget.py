@@ -10,10 +10,10 @@ from ..core.history import HistoryRecord, HistoryManager
 class HistoryItem(ctk.CTkFrame):
     """单条历史记录卡片"""
 
-    CARD_FG = ("#ffffff", "#142640")
-    CARD_BORDER = ("#c7d8ff", "#294166")
-    TEXT = ("#10233f", "#f5f7ff")
-    MUTED = ("#60708c", "#92a3c7")
+    CARD_FG = "#ffffff"
+    CARD_BORDER = "#c7d8ff"
+    TEXT = "#10233f"
+    MUTED = "#60708c"
 
     def __init__(
         self,
@@ -146,9 +146,9 @@ class HistoryPanel(ctk.CTkScrollableFrame):
         super().__init__(
             master,
             corner_radius=22,
-            fg_color=("#f7faff", "#0f1d31"),
+            fg_color="#f7faff",
             border_width=1,
-            border_color=("#c7d8ff", "#294166"),
+            border_color="#c7d8ff",
             **kwargs,
         )
 
@@ -172,7 +172,7 @@ class HistoryPanel(ctk.CTkScrollableFrame):
             header_frame,
             text="历史记录",
             font=ctk.CTkFont(size=18, weight="bold"),
-            text_color=("#10233f", "#f5f7ff"),
+            text_color="#10233f",
         ).pack(side="left")
 
         # 清空按钮
@@ -182,9 +182,9 @@ class HistoryPanel(ctk.CTkScrollableFrame):
             width=86,
             height=32,
             corner_radius=16,
-            fg_color=("#eef3ff", "#17283e"),
-            hover_color=("#ffd9e0", "#4a1c2b"),
-            text_color=("#10233f", "#f5f7ff"),
+            fg_color="#eef3ff",
+            hover_color="#ffd9e0",
+            text_color="#10233f",
             font=ctk.CTkFont(size=12),
             command=self._on_clear_all,
         )
@@ -195,7 +195,7 @@ class HistoryPanel(ctk.CTkScrollableFrame):
             self,
             text="暂无历史记录\n新的分析和调研会自动保存在这里。",
             font=ctk.CTkFont(size=13),
-            text_color=("#60708c", "#92a3c7"),
+            text_color="#60708c",
         )
 
         self.load_more_btn = ctk.CTkButton(
@@ -204,9 +204,9 @@ class HistoryPanel(ctk.CTkScrollableFrame):
             width=100,
             height=34,
             corner_radius=17,
-            fg_color=("#eef3ff", "#17283e"),
-            hover_color=("#dde8ff", "#243956"),
-            text_color=("#10233f", "#f5f7ff"),
+            fg_color="#eef3ff",
+            hover_color="#dde8ff",
+            text_color="#10233f",
             font=ctk.CTkFont(size=12, weight="bold"),
             command=self._load_next_page,
         )

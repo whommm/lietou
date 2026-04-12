@@ -9,28 +9,15 @@ class BatchMatchWidget(ctk.CTkFrame):
     """Batch match workspace focused on Excel task execution."""
 
     PALETTE = {
-        "light": {
-            "panel": ("#ffffff", "#ffffff"),
-            "panel_alt": ("#f7faff", "#f7faff"),
-            "border": ("#c7d8ff", "#c7d8ff"),
-            "text": ("#10233f", "#10233f"),
-            "muted": ("#60708c", "#60708c"),
-            "accent": ("#4f7cff", "#4f7cff"),
-            "accent_hover": ("#365df3", "#365df3"),
-            "secondary": ("#eef3ff", "#eef3ff"),
-            "secondary_hover": ("#dce7ff", "#dce7ff"),
-        },
-        "dark": {
-            "panel": ("#f7faff", "#0f1d31"),
-            "panel_alt": ("#ffffff", "#142640"),
-            "border": ("#c7d8ff", "#294166"),
-            "text": ("#10233f", "#f5f7ff"),
-            "muted": ("#60708c", "#92a3c7"),
-            "accent": ("#4f7cff", "#6d8cff"),
-            "accent_hover": ("#365df3", "#8f63ff"),
-            "secondary": ("#e6efff", "#17283e"),
-            "secondary_hover": ("#d3e2ff", "#243956"),
-        },
+        "panel": "#ffffff",
+        "panel_alt": "#f7faff",
+        "border": "#c7d8ff",
+        "text": "#10233f",
+        "muted": "#60708c",
+        "accent": "#4f7cff",
+        "accent_hover": "#365df3",
+        "secondary": "#eef3ff",
+        "secondary_hover": "#dce7ff",
     }
 
     def __init__(
@@ -61,15 +48,15 @@ class BatchMatchWidget(ctk.CTkFrame):
 
     def _setup_ui(self):
         self.configure(fg_color="transparent")
-        self.grid_columnconfigure(0, weight=4)
-        self.grid_columnconfigure(1, weight=5)
+        self.grid_columnconfigure(0, weight=2)
+        self.grid_columnconfigure(1, weight=3)
         self.grid_rowconfigure(0, weight=1)
 
         self._build_control_panel()
         self._build_status_panel()
 
     def _build_control_panel(self):
-        colors = self.PALETTE[self.theme]
+        colors = self.PALETTE
         frame = ctk.CTkFrame(
             self,
             corner_radius=24,
@@ -77,7 +64,7 @@ class BatchMatchWidget(ctk.CTkFrame):
             border_width=1,
             border_color=colors["border"],
         )
-        frame.grid(row=0, column=0, padx=(10, 6), pady=10, sticky="nsew")
+        frame.grid(row=0, column=0, padx=(10, 5), pady=10, sticky="nsew")
         frame.grid_columnconfigure(0, weight=1)
 
         ctk.CTkLabel(
@@ -253,7 +240,7 @@ class BatchMatchWidget(ctk.CTkFrame):
         self.cancel_batch_btn.grid(row=8, column=0, padx=16, pady=(0, 16), sticky="ew")
 
     def _build_status_panel(self):
-        colors = self.PALETTE[self.theme]
+        colors = self.PALETTE
         frame = ctk.CTkFrame(
             self,
             corner_radius=24,
@@ -261,7 +248,7 @@ class BatchMatchWidget(ctk.CTkFrame):
             border_width=1,
             border_color=colors["border"],
         )
-        frame.grid(row=0, column=1, padx=(6, 10), pady=10, sticky="nsew")
+        frame.grid(row=0, column=1, padx=(5, 10), pady=10, sticky="nsew")
         frame.grid_columnconfigure(0, weight=1)
         frame.grid_rowconfigure(4, weight=1)
 

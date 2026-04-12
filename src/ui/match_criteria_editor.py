@@ -137,28 +137,15 @@ class MatchCriteriaEditor(ctk.CTkFrame):
     """Editable match criteria panel."""
 
     PALETTE = {
-        "light": {
-            "panel": "#ffffff",
-            "panel_alt": "#f7faff",
-            "border": "#c7d8ff",
-            "text": "#10233f",
-            "muted": "#60708c",
-            "accent": "#4f7cff",
-            "accent_hover": "#365df3",
-            "secondary": "#eef3ff",
-            "secondary_hover": "#dce7ff",
-        },
-        "dark": {
-            "panel": "#0f1d31",
-            "panel_alt": "#142640",
-            "border": "#294166",
-            "text": "#f5f7ff",
-            "muted": "#92a3c7",
-            "accent": "#6d8cff",
-            "accent_hover": "#8f63ff",
-            "secondary": "#17283e",
-            "secondary_hover": "#243956",
-        },
+        "panel": "#ffffff",
+        "panel_alt": "#f7faff",
+        "border": "#c7d8ff",
+        "text": "#10233f",
+        "muted": "#60708c",
+        "accent": "#4f7cff",
+        "accent_hover": "#365df3",
+        "secondary": "#eef3ff",
+        "secondary_hover": "#dce7ff",
     }
 
     def __init__(
@@ -175,7 +162,7 @@ class MatchCriteriaEditor(ctk.CTkFrame):
         self.on_change = on_change
         self.theme = theme
         self._default_criteria: Optional[MatchCriteria] = None
-        self._colors = self.PALETTE.get(theme, self.PALETTE["light"])
+        self._colors = self.PALETTE
         self.configure(fg_color=self._colors["panel_alt"], corner_radius=16)
 
         self._criteria = criteria if criteria is not None else MatchCriteria()

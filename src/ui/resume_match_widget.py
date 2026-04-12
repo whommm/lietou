@@ -12,28 +12,15 @@ class ResumeMatchWidget(ctk.CTkFrame):
     """简历匹配界面组件"""
 
     PALETTE = {
-        "dark": {
-            "panel": ("#f7faff", "#0f1d31"),
-            "panel_alt": ("#ffffff", "#142640"),
-            "border": ("#c7d8ff", "#294166"),
-            "text": ("#10233f", "#f5f7ff"),
-            "muted": ("#60708c", "#92a3c7"),
-            "accent": ("#4f7cff", "#6d8cff"),
-            "accent_hover": ("#365df3", "#8f63ff"),
-            "secondary": ("#e6efff", "#17283e"),
-            "secondary_hover": ("#d3e2ff", "#243956"),
-        },
-        "light": {
-            "panel": ("#ffffff", "#ffffff"),
-            "panel_alt": ("#f7faff", "#f7faff"),
-            "border": ("#c7d8ff", "#c7d8ff"),
-            "text": ("#10233f", "#10233f"),
-            "muted": ("#60708c", "#60708c"),
-            "accent": ("#4f7cff", "#4f7cff"),
-            "accent_hover": ("#365df3", "#365df3"),
-            "secondary": ("#eef3ff", "#eef3ff"),
-            "secondary_hover": ("#dce7ff", "#dce7ff"),
-        },
+        "panel": "#ffffff",
+        "panel_alt": "#f7faff",
+        "border": "#c7d8ff",
+        "text": "#10233f",
+        "muted": "#60708c",
+        "accent": "#4f7cff",
+        "accent_hover": "#365df3",
+        "secondary": "#eef3ff",
+        "secondary_hover": "#dce7ff",
     }
 
     def __init__(
@@ -66,7 +53,7 @@ class ResumeMatchWidget(ctk.CTkFrame):
 
     def _build_input_panel(self):
         """构建左侧输入面板"""
-        colors = self.PALETTE[self.theme]
+        colors = self.PALETTE
         input_frame = ctk.CTkFrame(
             self,
             corner_radius=24,
@@ -183,7 +170,7 @@ class ResumeMatchWidget(ctk.CTkFrame):
 
     def _build_result_panel(self):
         """构建右侧结果面板"""
-        colors = self.PALETTE[self.theme]
+        colors = self.PALETTE
         result_frame = ctk.CTkFrame(
             self,
             corner_radius=24,
@@ -339,6 +326,5 @@ class ResumeMatchWidget(ctk.CTkFrame):
         self.html_renderer.set_content(text)
 
     def set_theme(self, theme: str):
-        """设置主题"""
-        self.theme = theme
+        """设置主题（当前仅支持 light）。"""
         self.html_renderer.set_theme(theme)

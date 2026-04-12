@@ -9,28 +9,15 @@ class CandidateLibraryWidget(ctk.CTkFrame):
     """Candidate capture workspace focused on task control."""
 
     PALETTE = {
-        "light": {
-            "panel": ("#ffffff", "#ffffff"),
-            "panel_alt": ("#f7faff", "#f7faff"),
-            "border": ("#c7d8ff", "#c7d8ff"),
-            "text": ("#10233f", "#10233f"),
-            "muted": ("#60708c", "#60708c"),
-            "accent": ("#4f7cff", "#4f7cff"),
-            "accent_hover": ("#365df3", "#365df3"),
-            "secondary": ("#eef3ff", "#eef3ff"),
-            "secondary_hover": ("#dce7ff", "#dce7ff"),
-        },
-        "dark": {
-            "panel": ("#f7faff", "#0f1d31"),
-            "panel_alt": ("#ffffff", "#142640"),
-            "border": ("#c7d8ff", "#294166"),
-            "text": ("#10233f", "#f5f7ff"),
-            "muted": ("#60708c", "#92a3c7"),
-            "accent": ("#4f7cff", "#6d8cff"),
-            "accent_hover": ("#365df3", "#8f63ff"),
-            "secondary": ("#e6efff", "#17283e"),
-            "secondary_hover": ("#d3e2ff", "#243956"),
-        },
+        "panel": "#ffffff",
+        "panel_alt": "#f7faff",
+        "border": "#c7d8ff",
+        "text": "#10233f",
+        "muted": "#60708c",
+        "accent": "#4f7cff",
+        "accent_hover": "#365df3",
+        "secondary": "#eef3ff",
+        "secondary_hover": "#dce7ff",
     }
 
     def __init__(
@@ -78,7 +65,7 @@ class CandidateLibraryWidget(ctk.CTkFrame):
         self._build_status_panel()
 
     def _build_top_action_bar(self):
-        colors = self.PALETTE[self.theme]
+        colors = self.PALETTE
         frame = ctk.CTkFrame(
             self,
             corner_radius=22,
@@ -141,7 +128,7 @@ class CandidateLibraryWidget(ctk.CTkFrame):
         self.debug_btn.grid(row=0, column=3, padx=(6, 14), pady=14, sticky="ew")
 
     def _build_control_panel(self):
-        colors = self.PALETTE[self.theme]
+        colors = self.PALETTE
         frame = ctk.CTkFrame(
             self,
             corner_radius=24,
@@ -256,37 +243,10 @@ class CandidateLibraryWidget(ctk.CTkFrame):
         self.max_pages_entry.pack(fill="x", padx=12, pady=(0, 10))
         self.max_pages_entry.insert(0, "1")
 
-        ctk.CTkLabel(frame, text="搜索词预览", text_color=colors["text"]).grid(
-            row=5, column=0, padx=16, pady=(6, 6), sticky="w"
-        )
-        self.strategy_box = ctk.CTkTextbox(
-            frame,
-            height=110,
-            wrap="word",
-            corner_radius=18,
-            border_width=1,
-            border_color=colors["border"],
-            fg_color=colors["panel_alt"],
-            text_color=colors["text"],
-            scrollbar_button_color=colors["accent"],
-            scrollbar_button_hover_color=colors["accent_hover"],
-        )
-        self.strategy_box.grid(row=6, column=0, padx=16, pady=(0, 10), sticky="ew")
 
-        self.save_strategy_btn = ctk.CTkButton(
-            frame,
-            text="保存搜索词修改",
-            height=34,
-            corner_radius=16,
-            fg_color=colors["secondary"],
-            hover_color=colors["secondary_hover"],
-            text_color=colors["text"],
-            command=self._save_strategy_changes,
-        )
-        self.save_strategy_btn.grid(row=7, column=0, padx=16, pady=(0, 16), sticky="e")
 
     def _build_status_panel(self):
-        colors = self.PALETTE[self.theme]
+        colors = self.PALETTE
         frame = ctk.CTkFrame(
             self,
             corner_radius=24,
@@ -418,11 +378,11 @@ class CandidateLibraryWidget(ctk.CTkFrame):
     def _on_job_selected(self, value: str):
         payload = self.job_data_map.get(value)
         if not payload:
-            self._set_strategy_text("请先从岗位分析同步搜索策略。")
+            self.strategy_payload = {}
+            self._set_info_text("请先从岗位分析同步搜索策略。")
             return
         self.strategy_payload = payload.get("strategy", {})
         self.task_id = ""
-        self._set_strategy_text(self._format_strategy_text(self.strategy_payload))
         self._set_info_text("已选择岗位：{}\n等待开始抓取。".format(value))
 
     def _on_run_task_click(self):
@@ -510,82 +470,10 @@ class CandidateLibraryWidget(ctk.CTkFrame):
     def get_excel_file(self) -> str:
         return self._excel_file_path
 
-    def _set_strategy_text(self, text: str):
-        self.strategy_box.delete("1.0", "end")
-        self.strategy_box.insert("1.0", text)
-
     def _set_info_text(self, text: str):
         self.info_box.delete("1.0", "end")
         self.info_box.insert("1.0", text)
         self.info_label.configure(text=text.splitlines()[0] if text else "")
-
-    def _save_strategy_changes(self):
-        job_label = self.job_combo.get().strip()
-        payload = self.job_data_map.get(job_label)
-        if not payload:
-            messagebox.showwarning("提示", "请先选择岗位后再保存搜索词")
-            return
-        parsed = self._parse_strategy_text(self.strategy_box.get("1.0", "end"))
-        if not any(parsed.values()):
-            messagebox.showwarning("提示", "当前没有可保存的搜索词内容")
-            return
-        self.strategy_payload = parsed
-        payload["strategy"] = parsed
-        self.job_data_map[job_label] = payload
-        self._set_strategy_text(self._format_strategy_text(parsed))
-        self._set_info_text("已保存当前岗位的搜索策略修改，可直接继续抓取。")
-        messagebox.showinfo("成功", "搜索策略已保存")
-
-    def _format_strategy_text(self, strategy: Dict[str, List[str]]) -> str:
-        if not strategy:
-            return "请先从岗位分析同步搜索策略。"
-        lines = []
-        mappings = [
-            ("精准词", strategy.get("precise_keywords", [])),
-            ("扩池词", strategy.get("expansion_keywords", [])),
-            ("同义词", strategy.get("synonyms", [])),
-            ("排除词", strategy.get("exclude_keywords", [])),
-            ("布尔预留", strategy.get("boolean_queries", [])),
-        ]
-        for label, values in mappings:
-            if values:
-                lines.append("【{}】{}".format(label, "、".join(values)))
-        return "\n\n".join(lines) if lines else "未生成可用搜索词。"
-
-    def _parse_strategy_text(self, text: str) -> Dict[str, List[str]]:
-        label_map = {
-            "精准词": "precise_keywords",
-            "扩池词": "expansion_keywords",
-            "同义词": "synonyms",
-            "排除词": "exclude_keywords",
-            "布尔预留": "boolean_queries",
-            "来源公司": "source_company_hints",
-            "来源线索": "source_company_hints",
-        }
-        parsed = {
-            "precise_keywords": [],
-            "expansion_keywords": [],
-            "synonyms": [],
-            "exclude_keywords": [],
-            "boolean_queries": [],
-            "source_company_hints": [],
-        }
-        for block in text.splitlines():
-            line = block.strip()
-            if not line.startswith("【") or "】" not in line:
-                continue
-            label = line[1 : line.index("】")].strip()
-            value_text = line[line.index("】") + 1 :].strip()
-            target_key = label_map.get(label)
-            if not target_key:
-                continue
-            values = [
-                item.strip()
-                for item in value_text.replace("，", "、").split("、")
-                if item.strip()
-            ]
-            parsed[target_key] = values
-        return parsed
 
     def set_candidate_records(self, records: List[Dict]):
         self._candidate_records = records or []

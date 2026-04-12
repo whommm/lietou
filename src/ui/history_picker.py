@@ -39,7 +39,6 @@ class HistoryPickerDialog(ctk.CTkToplevel):
         super().__init__(master)
         self.records = records
         self.on_select = on_select
-        self.theme = theme
         self.filtered_records = list(records)
         self._selected_record: Optional[HistoryRecord] = None
         self._item_frames = []
