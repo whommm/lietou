@@ -36,6 +36,7 @@ from ..utils.helpers import validate_api_key, validate_url
 from .candidate_library_widget import CandidateLibraryWidget
 from .company_research_widget import CompanyResearchWidget
 from .history_picker import HistoryPickerDialog
+from .selector_dialog import SelectorDialog
 from .job_analysis_widget import JobAnalysisWidget
 from .resume_match_widget import ResumeMatchWidget
 
@@ -1321,30 +1322,30 @@ class MainWindow(ctk.CTk):
             if selected_record is not None:
                 for label, payload in job_data_map.items():
                     if payload.get("record_id") == selected_record.id:
-                        self.batch_match_widget.job_combo.set(label)
+                        self.batch_match_widget.set_selected_job(label)
                         break
 
     def _open_job_history_picker(self):
         """打开岗位分析历史选择器。"""
-        dialog = HistoryPickerDialog(
+        dialog = SelectorDialog(
             self,
             title="选择岗位分析历史",
             records=self.job_history_manager.get_all(),
             on_select=self._on_job_history_selected,
             empty_text="暂无岗位分析历史，可先去岗位分析页生成记录。",
-            theme=self.FIXED_THEME,
+            get_display_text=lambda r: f"{r.title}  [{r.created_at}]",
         )
         dialog.focus()
 
     def _open_company_history_picker(self):
         """打开公司调研历史选择器。"""
-        dialog = HistoryPickerDialog(
+        dialog = SelectorDialog(
             self,
             title="选择公司调研历史",
             records=self.company_history_manager.get_all(),
             on_select=self._on_company_history_selected,
             empty_text="暂无公司调研历史，可先去公司调研页生成记录。",
-            theme=self.FIXED_THEME,
+            get_display_text=lambda r: f"{r.title}  [{r.created_at}]",
         )
         dialog.focus()
 
@@ -1352,7 +1353,7 @@ class MainWindow(ctk.CTk):
         """从历史选择公司调研后，更新岗位分析快捷选择。"""
         current_values = [
             item
-            for item in self.job_analysis_widget.company_combo.cget("values")
+            for item in getattr(self.job_analysis_widget, "_company_options", [])
             if item != "不使用"
         ]
         values = [record.title] + [
@@ -1381,7 +1382,7 @@ class MainWindow(ctk.CTk):
             item: current_map[item] for item in values if item in current_map
         }
         self.resume_match_widget.update_job_list(values, filtered_map)
-        self.resume_match_widget.job_combo.set(label)
+        self.resume_match_widget.set_selected_job(label)
 
         current_candidate_values = [
             item
@@ -1399,13 +1400,12 @@ class MainWindow(ctk.CTk):
                 list(candidate_map.keys()), candidate_map
             )
             self.candidate_library_widget.set_selected_job(label)
-            self.tabview.set("候选人抓取")
 
         if hasattr(self, "batch_match_widget"):
             self.batch_match_widget.update_job_options(
                 list(candidate_map.keys()), candidate_map
             )
-            self.batch_match_widget.job_combo.set(label)
+            self.batch_match_widget.set_selected_job(label)
 
         # Also sync to job analysis widget if it has match criteria persisted
         self._raw_result = record.result

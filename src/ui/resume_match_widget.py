@@ -91,26 +91,21 @@ class ResumeMatchWidget(ctk.CTkFrame):
         picker_row.grid(row=3, column=0, padx=16, pady=(0, 10), sticky="ew")
         picker_row.grid_columnconfigure(0, weight=1)
 
-        self.job_combo = ctk.CTkComboBox(
+        self.job_display = ctk.CTkEntry(
             picker_row,
-            values=self.job_list,
+            state="readonly",
             corner_radius=16,
             height=38,
             fg_color=colors["panel_alt"],
             border_color=colors["border"],
-            button_color=colors["accent"],
-            button_hover_color=colors["accent_hover"],
-            dropdown_fg_color=colors["panel_alt"],
-            dropdown_hover_color=colors["secondary_hover"],
-            dropdown_text_color=colors["text"],
             text_color=colors["text"],
         )
-        self.job_combo.grid(row=0, column=0, sticky="ew")
+        self.job_display.grid(row=0, column=0, sticky="ew")
 
         self.job_picker_btn = ctk.CTkButton(
             picker_row,
-            text="从历史选择",
-            width=112,
+            text="选择 ▼",
+            width=80,
             height=38,
             corner_radius=18,
             fg_color=colors["secondary"],
@@ -233,7 +228,7 @@ class ResumeMatchWidget(ctk.CTkFrame):
 
     def _on_match_click(self):
         """匹配按钮点击事件"""
-        job_title = self.job_combo.get()
+        job_title = self.job_display.get()
         resume = self.resume_text.get("1.0", "end-1c").strip()
 
         if not job_title or job_title == "请先分析岗位":
@@ -286,7 +281,7 @@ class ResumeMatchWidget(ctk.CTkFrame):
             self.job_picker_btn.configure(state="disabled")
             self.copy_all_btn.configure(state="disabled")
             self.clear_result_btn.configure(state="disabled")
-            self.job_combo.configure(state="disabled")
+            self.job_display.configure(state="disabled")
             self.resume_text.configure(state="disabled")
         else:
             self.match_btn.configure(state="normal", text="开始匹配分析")
@@ -294,7 +289,7 @@ class ResumeMatchWidget(ctk.CTkFrame):
             self.job_picker_btn.configure(state="normal")
             self.copy_all_btn.configure(state="normal")
             self.clear_result_btn.configure(state="normal")
-            self.job_combo.configure(state="normal")
+            self.job_display.configure(state="normal")
             self.resume_text.configure(state="normal")
 
     def update_job_list(self, job_list: list, job_data_map: Dict[str, str] = None):
@@ -302,9 +297,14 @@ class ResumeMatchWidget(ctk.CTkFrame):
         self.job_list = job_list
         if job_data_map:
             self.job_data_map = job_data_map
-        self.job_combo.configure(values=job_list)
         if job_list:
-            self.job_combo.set(job_list[0])
+            self.set_selected_job(job_list[0])
+
+    def set_selected_job(self, label: str):
+        self.job_display.configure(state="normal")
+        self.job_display.delete(0, "end")
+        self.job_display.insert(0, label)
+        self.job_display.configure(state="readonly")
 
     def show_loading(self):
         """显示加载状态。"""

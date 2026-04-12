@@ -161,27 +161,21 @@ class CandidateLibraryWidget(ctk.CTkFrame):
         picker_row.grid(row=3, column=0, padx=16, pady=(0, 10), sticky="ew")
         picker_row.grid_columnconfigure(0, weight=1)
 
-        self.job_combo = ctk.CTkComboBox(
+        self.job_display = ctk.CTkEntry(
             picker_row,
-            values=self.job_options,
+            state="readonly",
             corner_radius=16,
             height=38,
             fg_color=colors["panel_alt"],
             border_color=colors["border"],
-            button_color=colors["accent"],
-            button_hover_color=colors["accent_hover"],
-            dropdown_fg_color=colors["panel_alt"],
-            dropdown_hover_color=colors["secondary_hover"],
-            dropdown_text_color=colors["text"],
             text_color=colors["text"],
-            command=self._on_job_selected,
         )
-        self.job_combo.grid(row=0, column=0, sticky="ew")
+        self.job_display.grid(row=0, column=0, sticky="ew")
 
         self.pick_job_btn = ctk.CTkButton(
             picker_row,
-            text="从历史选择",
-            width=112,
+            text="选择 ▼",
+            width=80,
             height=38,
             corner_radius=18,
             fg_color=colors["secondary"],
@@ -386,7 +380,7 @@ class CandidateLibraryWidget(ctk.CTkFrame):
         self._set_info_text("已选择岗位：{}\n等待开始抓取。".format(value))
 
     def _on_run_task_click(self):
-        job_label = self.job_combo.get().strip()
+        job_label = self.job_display.get().strip()
         payload = self.job_data_map.get(job_label)
         if not payload:
             messagebox.showwarning("提示", "请先选择一个已生成搜索策略的岗位")
@@ -425,13 +419,14 @@ class CandidateLibraryWidget(ctk.CTkFrame):
     ):
         self.job_options = job_options or ["请先分析岗位"]
         self.job_data_map = job_data_map or {}
-        self.job_combo.configure(values=self.job_options)
         if self.job_options:
-            self.job_combo.set(self.job_options[0])
-            self._on_job_selected(self.job_options[0])
+            self.set_selected_job(self.job_options[0])
 
     def set_selected_job(self, job_label: str):
-        self.job_combo.set(job_label)
+        self.job_display.configure(state="normal")
+        self.job_display.delete(0, "end")
+        self.job_display.insert(0, job_label)
+        self.job_display.configure(state="readonly")
         self._on_job_selected(job_label)
 
     def set_running(self, running: bool):
@@ -447,7 +442,7 @@ class CandidateLibraryWidget(ctk.CTkFrame):
         self.open_excel_dir_btn.configure(state=state)
         self.debug_btn.configure(state=state)
         self.pick_job_btn.configure(state=state)
-        self.job_combo.configure(state=state)
+        self.job_display.configure(state=state)
         self.max_candidates_entry.configure(state=state)
         self.max_pages_entry.configure(state=state)
 

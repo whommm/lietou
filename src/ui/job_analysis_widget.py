@@ -132,26 +132,21 @@ class JobAnalysisWidget(ctk.CTkFrame):
         picker_row.grid(row=3, column=0, padx=16, pady=(0, 8), sticky="ew")
         picker_row.grid_columnconfigure(0, weight=1)
 
-        self.company_combo = ctk.CTkComboBox(
+        self.company_display = ctk.CTkEntry(
             picker_row,
-            values=company_options,
+            state="readonly",
             corner_radius=16,
             height=38,
             fg_color=colors["panel_alt"],
             border_color=colors["border"],
-            button_color=colors["accent"],
-            button_hover_color=colors["accent_hover"],
-            dropdown_fg_color=colors["panel_alt"],
-            dropdown_hover_color=colors["secondary_hover"],
-            dropdown_text_color=colors["text"],
             text_color=colors["text"],
         )
-        self.company_combo.grid(row=0, column=0, sticky="ew")
+        self.company_display.grid(row=0, column=0, sticky="ew")
 
         self.company_picker_btn = ctk.CTkButton(
             picker_row,
-            text="从历史选择",
-            width=112,
+            text="选择 ▼",
+            width=80,
             height=38,
             corner_radius=18,
             fg_color=colors["secondary"],
@@ -161,7 +156,7 @@ class JobAnalysisWidget(ctk.CTkFrame):
         )
         self.company_picker_btn.grid(row=0, column=1, padx=(10, 0), sticky="e")
         if company_options:
-            self.company_combo.set(company_options[0])
+            self.set_selected_company(company_options[0])
 
         self.jd_textbox = ctk.CTkTextbox(
             input_frame,
@@ -337,11 +332,7 @@ class JobAnalysisWidget(ctk.CTkFrame):
 
     def _on_company_record_selected(self, record):
         """选择公司历史后更新快捷选择。"""
-        self.company_combo.set(record.title)
-
-    def set_selected_company(self, title: str):
-        """设置当前选中的公司调研项。"""
-        self.company_combo.set(title)
+        self.set_selected_company(record.title)
 
     def _on_clear_result_click(self):
         """清空结果。"""
@@ -429,16 +420,6 @@ class JobAnalysisWidget(ctk.CTkFrame):
         self.jd_textbox.delete("1.0", "end")
         self.jd_textbox.insert("1.0", text)
 
-    def get_selected_company(self) -> str:
-        """获取选中的公司调研项。"""
-        return self.company_combo.get().strip()
-
-    def update_company_options(self, values: List[str]):
-        """更新公司调研选项。"""
-        self.company_combo.configure(values=values)
-        if values:
-            self.company_combo.set(values[0])
-
     def show_loading(self):
         """显示加载状态。"""
         if self._showing_history:
@@ -495,7 +476,7 @@ class JobAnalysisWidget(ctk.CTkFrame):
             self.clear_result_btn.configure(state="disabled")
             self.history_btn.configure(state="disabled")
             self.send_candidates_btn.configure(state="disabled")
-            self.company_combo.configure(state="disabled")
+            self.company_display.configure(state="disabled")
             self.jd_textbox.configure(state="disabled")
         else:
             self.analyze_btn.configure(state="normal", text="开始分析")
@@ -505,7 +486,7 @@ class JobAnalysisWidget(ctk.CTkFrame):
             self.clear_result_btn.configure(state="normal")
             self.history_btn.configure(state="normal")
             self.send_candidates_btn.configure(state="normal")
-            self.company_combo.configure(state="normal")
+            self.company_display.configure(state="normal")
             self.jd_textbox.configure(state="normal")
 
     def set_theme(self, theme: str):
