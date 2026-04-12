@@ -336,11 +336,8 @@ class LiepinBrowserManager:
         if self._context is not None:
             if self._is_context_alive_locked():
                 return self._get_state_locked()
-            # Browser was closed externally; clean up stale references
-            try:
-                self._context.close()
-            except Exception:
-                pass
+            # Browser was closed externally; don't call close() here because
+            # it can block for 30s if the browser process is already dead.
             self._context = None
             self._page = None
 
@@ -375,20 +372,25 @@ class LiepinBrowserManager:
         launch_kwargs = dict(default_launch_kwargs)
 
         preferred_channel = self.config_manager.config.liepin_browser_channel
-        if preferred_channel in ("chrome", "msedge"):
-            launch_kwargs["channel"] = preferred_channel
-
+        detected_channel = ""
+        if getattr(sys, "frozen", False):
+            detected_channel, _ = self._find_system_browser_executable()
         logger.warning(
-            "Liepin browser launch prepare: frozen=%s, preferred_channel=%s, playwright_browsers_path=%s, profile_dir=%s",
+            "Liepin browser launch prepare: frozen=%s, preferred_channel=%s, detected_channel=%s, playwright_browsers_path=%s, profile_dir=%s",
             getattr(sys, "frozen", False),
             preferred_channel,
+            detected_channel or "",
             os.environ.get("PLAYWRIGHT_BROWSERS_PATH", ""),
             profile_dir,
         )
+        if detected_channel:
+            launch_kwargs["channel"] = detected_channel
+        elif preferred_channel in ("chrome", "msedge"):
+            launch_kwargs["channel"] = preferred_channel
 
         try:
             logger.warning(
-                "Liepin browser launch mode: playwright channel/default, launch_kwargs=%s",
+                "Liepin browser launch mode: channel/default, launch_kwargs=%s",
                 {
                     key: value
                     for key, value in launch_kwargs.items()
@@ -422,7 +424,7 @@ class LiepinBrowserManager:
             pass
 
         actual_browser = (
-            executable_path or launch_kwargs.get("channel") or "playwright-chromium"
+            launch_kwargs.get("channel") or "playwright-chromium"
         )
         logger.warning(
             "Liepin browser launch success: actual_browser=%s, current_url=%s",
@@ -783,6 +785,8 @@ class LiepinBrowserManager:
         """Close only the browser context without killing the worker thread."""
         def _close_browser_locked() -> None:
             if self._context is not None:
+                # Use a short timeout to avoid blocking when the browser
+                # process is already dead.
                 try:
                     self._context.close()
                 except Exception:
