@@ -23,6 +23,8 @@ class HistoryRecord:
     result: str = ""
     created_at: str = ""
     record_type: str = "job_analysis"  # job_analysis, resume_match, company_research
+    match_criteria_json: str = ""
+    match_criteria_confirmed: bool = False
 
 
 class HistoryManager:
@@ -247,6 +249,8 @@ class HistoryManager:
             result=result,
             created_at=now.strftime("%Y-%m-%d %H:%M:%S"),
             record_type=self.record_type,
+            match_criteria_json="",
+            match_criteria_confirmed=False,
         )
         self.records.insert(0, record)
         self._enforce_limit()

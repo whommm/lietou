@@ -1,0 +1,9 @@
+{
+  "api_base_url": "https://api.deepseek.com/v1",
+  "api_key": "sk-your-api-key-here",
+  "model_name": "deepseek-chat",
+  "tavily_api_key": "tvly-your-api-key-here",
+  "timeout": 120,
+  "theme": "light",
+  "liepin_browser_channel": "msedge"
+}

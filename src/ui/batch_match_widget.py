@@ -170,6 +170,56 @@ class BatchMatchWidget(ctk.CTkFrame):
             row=2, column=0, padx=14, pady=(6, 14), sticky="w"
         )
 
+        concurrency_card = ctk.CTkFrame(
+            frame,
+            corner_radius=18,
+            fg_color=colors["panel_alt"],
+            border_width=1,
+            border_color=colors["border"],
+        )
+        concurrency_card.grid(row=5, column=0, padx=16, pady=(0, 10), sticky="ew")
+        concurrency_card.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            concurrency_card,
+            text="并发数（同时请求 API 数量）",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color=colors["text"],
+        ).grid(row=0, column=0, padx=14, pady=(10, 2), sticky="w")
+
+        slider_row = ctk.CTkFrame(concurrency_card, fg_color="transparent")
+        slider_row.grid(row=1, column=0, padx=14, pady=(2, 10), sticky="ew")
+        slider_row.grid_columnconfigure(1, weight=1)
+
+        self.concurrency_label = ctk.CTkLabel(
+            slider_row,
+            text="5",
+            width=24,
+            text_color=colors["text"],
+            font=ctk.CTkFont(size=12, weight="bold"),
+        )
+        self.concurrency_label.grid(row=0, column=0, padx=(0, 8))
+
+        self.concurrency_slider = ctk.CTkSlider(
+            slider_row,
+            from_=1,
+            to=10,
+            number_of_steps=9,
+            width=200,
+            height=16,
+            corner_radius=8,
+            button_color=colors["accent"],
+            button_hover_color=colors["accent_hover"],
+        )
+        self.concurrency_slider.set(5)
+        self.concurrency_slider.grid(row=0, column=1, sticky="ew")
+        self.concurrency_slider.bind(
+            "<ButtonRelease-1>", self._on_concurrency_change
+        )
+        self.concurrency_slider.bind(
+            "<B1-Motion>", self._on_concurrency_change
+        )
+
         self.import_excel_btn = ctk.CTkButton(
             frame,
             text="导入 Excel",
@@ -180,7 +230,7 @@ class BatchMatchWidget(ctk.CTkFrame):
             text_color=colors["text"],
             command=self._on_load_recent_batch_click,
         )
-        self.import_excel_btn.grid(row=5, column=0, padx=16, pady=(0, 10), sticky="ew")
+        self.import_excel_btn.grid(row=6, column=0, padx=16, pady=(0, 10), sticky="ew")
 
         self.run_batch_btn = ctk.CTkButton(
             frame,
@@ -193,7 +243,7 @@ class BatchMatchWidget(ctk.CTkFrame):
             font=ctk.CTkFont(size=12, weight="bold"),
             command=self._on_run_batch_click,
         )
-        self.run_batch_btn.grid(row=6, column=0, padx=16, pady=(0, 10), sticky="ew")
+        self.run_batch_btn.grid(row=7, column=0, padx=16, pady=(0, 10), sticky="ew")
 
         self.cancel_batch_btn = ctk.CTkButton(
             frame,
@@ -206,7 +256,7 @@ class BatchMatchWidget(ctk.CTkFrame):
             command=self._on_cancel_batch_click,
             state="disabled",
         )
-        self.cancel_batch_btn.grid(row=7, column=0, padx=16, pady=(0, 16), sticky="ew")
+        self.cancel_batch_btn.grid(row=8, column=0, padx=16, pady=(0, 16), sticky="ew")
 
     def _build_status_panel(self):
         colors = self.PALETTE[self.theme]
@@ -339,6 +389,13 @@ class BatchMatchWidget(ctk.CTkFrame):
         if self.on_open_excel_dir:
             self.on_open_excel_dir()
 
+    def _on_concurrency_change(self, _event=None):
+        val = int(round(self.concurrency_slider.get()))
+        self.concurrency_label.configure(text=str(val))
+
+    def get_concurrency(self) -> int:
+        return int(round(self.concurrency_slider.get()))
+
     def update_job_options(
         self, job_options: List[str], job_data_map: Dict[str, Dict[str, object]]
     ):
@@ -355,6 +412,7 @@ class BatchMatchWidget(ctk.CTkFrame):
         self.import_excel_btn.configure(state=state)
         self.open_excel_btn.configure(state=state)
         self.open_excel_dir_btn.configure(state=state)
+        self.concurrency_slider.configure(state=state)
         self.run_batch_btn.configure(
             state=state,
             text="批量匹配中..." if running else "开始批量匹配",
@@ -363,6 +421,41 @@ class BatchMatchWidget(ctk.CTkFrame):
 
     def set_results(self, info_text: str):
         self._set_summary_text(info_text)
+
+    def set_match_results(self, results: List[dict]):
+        """Display batch match results with tier classification."""
+        TIER_LABELS = {
+            "S": "🟢 S（强推）",
+            "A": "🔵 A（深聊）",
+            "B": "🟡 B（观望）",
+            "C": "🔴 C（放弃）",
+        }
+        lines = ["批量匹配完成，结果摘要：\n"]
+        for r in results:
+            name = r.get("candidate_name", "未命名候选人")
+            tier = r.get("tier")
+            core_met = r.get("core_met_count", 0)
+            core_total = r.get("core_total", 0)
+            recommendation = r.get("recommendation", "")
+            risks = r.get("risks", "")
+            summary = r.get("summary", "")
+            dealbreaker = r.get("dealbreaker_hit", False)
+
+            tier_text = TIER_LABELS.get(tier, tier) if tier else "待解析"
+            lines.append(f"{name} — {tier_text}")
+            if dealbreaker:
+                lines.append("  ⚠️ 命中一票否决项")
+            if core_total > 0:
+                lines.append(f"  ├─ 核心要求符合：{core_met}/{core_total}")
+            if recommendation:
+                lines.append(f"  ├─ 建议：{recommendation}")
+            if risks:
+                lines.append(f"  ├─ 关键风险：{risks}")
+            if summary:
+                lines.append(f"  └─ 结论：{summary}")
+            lines.append("")
+
+        self._set_summary_text("\n".join(lines))
 
     def set_progress(self, current: int, total: int, candidate_name: str):
         text = "批量匹配进行中：{}/{}，当前处理 {}。".format(

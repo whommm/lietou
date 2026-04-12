@@ -150,14 +150,14 @@ class CandidateExcelService:
         self,
         file_path: str,
         row_index: int,
-        score: Optional[int],
+        tier: Optional[str],
         detail: str,
         matched_at: Optional[str] = None,
     ) -> None:
         try:
             workbook = load_workbook(file_path)
             sheet = workbook[self.SHEET_NAME]
-            sheet.cell(row=row_index, column=self.HEADER_INDEX["匹配度分数"]).value = score
+            sheet.cell(row=row_index, column=self.HEADER_INDEX["匹配度分数"]).value = tier
             sheet.cell(row=row_index, column=self.HEADER_INDEX["匹配详情"]).value = (
                 detail or ""
             )

@@ -1,13 +1,46 @@
 """岗位分析 UI 组件。"""
 
+import json
+import re
+
 import customtkinter as ctk
 from tkinter import messagebox
 from typing import Callable, List, Optional
 
 from ..core.history import HistoryManager
+from ..models import MatchCriteria
 from ..utils.helpers import copy_to_clipboard
 from .history_widget import HistoryPanel
 from .html_renderer import HtmlRenderer
+from .match_criteria_editor import MatchCriteriaEditor
+
+
+def _extract_match_criteria_from_html(html_text: str) -> Optional[MatchCriteria]:
+    """Try to extract the trailing JSON match criteria from an analysis result."""
+    if not html_text:
+        return None
+    # 1. greedy regex for trailing JSON
+    m = re.search(r"\{.*\}\s*$", html_text, re.DOTALL)
+    if m:
+        try:
+            return MatchCriteria.from_dict(json.loads(m.group(0)))
+        except (ValueError, TypeError):
+            pass
+    # 2. markdown fenced json at end
+    m = re.search(r"```json\s*(\{.*\})\s*```\s*$", html_text, re.DOTALL)
+    if m:
+        try:
+            return MatchCriteria.from_dict(json.loads(m.group(1)))
+        except (ValueError, TypeError):
+            pass
+    # 3. pre/code tags
+    m = re.search(r"<(?:pre|code)[^>]*>(\{.*\})</(?:pre|code)>\s*$", html_text, re.DOTALL | re.IGNORECASE)
+    if m:
+        try:
+            return MatchCriteria.from_dict(json.loads(m.group(1)))
+        except (ValueError, TypeError):
+            pass
+    return None
 
 
 class JobAnalysisWidget(ctk.CTkFrame):
@@ -47,6 +80,7 @@ class JobAnalysisWidget(ctk.CTkFrame):
         on_send_to_candidates: Optional[Callable] = None,
         on_pick_company_history: Optional[Callable] = None,
         on_history_changed: Optional[Callable] = None,
+        on_save_match_criteria: Optional[Callable[[MatchCriteria], None]] = None,
         theme: str = "light",
         **kwargs,
     ):
@@ -56,11 +90,13 @@ class JobAnalysisWidget(ctk.CTkFrame):
         self.on_send_to_candidates = on_send_to_candidates
         self.on_pick_company_history = on_pick_company_history
         self.on_history_changed = on_history_changed
+        self.on_save_match_criteria = on_save_match_criteria
         self.theme = theme
 
         self.history_panel: Optional[HistoryPanel] = None
         self._showing_history = False
         self._result_buffer = ""
+        self._current_match_criteria: Optional[MatchCriteria] = None
 
         self._setup_ui(company_options)
 
@@ -209,7 +245,7 @@ class JobAnalysisWidget(ctk.CTkFrame):
         )
         result_frame.grid(row=0, column=1, padx=(5, 10), pady=10, sticky="nsew")
         result_frame.grid_columnconfigure(0, weight=1)
-        result_frame.grid_rowconfigure(1, weight=1)
+        result_frame.grid_rowconfigure(2, weight=1)
 
         header_frame = ctk.CTkFrame(result_frame, fg_color="transparent")
         header_frame.grid(row=0, column=0, padx=10, pady=(10, 5), sticky="ew")
@@ -264,8 +300,18 @@ class JobAnalysisWidget(ctk.CTkFrame):
         )
         self.clear_result_btn.pack(side="right", padx=5)
 
+        self.match_criteria_editor = MatchCriteriaEditor(
+            result_frame,
+            criteria=MatchCriteria(),
+            on_save=self._on_match_criteria_save,
+            theme=self.theme,
+        )
+        self.match_criteria_editor.grid(
+            row=1, column=0, padx=10, pady=(0, 5), sticky="ew"
+        )
+
         self.html_renderer = HtmlRenderer(result_frame, theme=self.theme)
-        self.html_renderer.grid(row=1, column=0, padx=10, pady=(5, 10), sticky="nsew")
+        self.html_renderer.grid(row=2, column=0, padx=10, pady=(0, 10), sticky="nsew")
         self._result_parent = result_frame
 
     def _on_analyze_click(self):
@@ -330,6 +376,7 @@ class JobAnalysisWidget(ctk.CTkFrame):
     def _show_history(self):
         """显示历史面板。"""
         self.html_renderer.grid_forget()
+        self.match_criteria_editor.grid_forget()
 
         if self.history_panel is None:
             self.history_panel = HistoryPanel(
@@ -341,7 +388,7 @@ class JobAnalysisWidget(ctk.CTkFrame):
         else:
             self.history_panel.refresh()
 
-        self.history_panel.grid(row=1, column=0, padx=10, pady=(5, 10), sticky="nsew")
+        self.history_panel.grid(row=2, column=0, padx=10, pady=(0, 10), sticky="nsew")
         self._showing_history = True
         self.history_btn.configure(text="返回")
 
@@ -349,7 +396,10 @@ class JobAnalysisWidget(ctk.CTkFrame):
         """隐藏历史面板。"""
         if self.history_panel:
             self.history_panel.grid_forget()
-        self.html_renderer.grid(row=1, column=0, padx=10, pady=(5, 10), sticky="nsew")
+        self.match_criteria_editor.grid(
+            row=1, column=0, padx=10, pady=(0, 5), sticky="ew"
+        )
+        self.html_renderer.grid(row=2, column=0, padx=10, pady=(0, 10), sticky="nsew")
         self._showing_history = False
         self.history_btn.configure(text="历史")
 
@@ -358,6 +408,17 @@ class JobAnalysisWidget(ctk.CTkFrame):
         self._hide_history()
         self.set_jd_text(record.jd_text)
         self.set_result(record.result)
+        # Also restore match criteria if persisted
+        if record.match_criteria_json:
+            try:
+                mc = MatchCriteria.from_dict(json.loads(record.match_criteria_json))
+                self.set_match_criteria(mc)
+            except (ValueError, TypeError):
+                pass
+
+    def _on_match_criteria_save(self, criteria: MatchCriteria):
+        if self.on_save_match_criteria:
+            self.on_save_match_criteria(criteria)
 
     def get_jd_text(self) -> str:
         """获取 JD 输入内容。"""
@@ -390,7 +451,9 @@ class JobAnalysisWidget(ctk.CTkFrame):
         if self._showing_history:
             self._hide_history()
         self._result_buffer = ""
+        self._current_match_criteria = None
         self.html_renderer.clear()
+        self.match_criteria_editor.set_criteria(MatchCriteria())
 
     def set_result(self, text: str):
         """设置结果内容。"""
@@ -399,9 +462,25 @@ class JobAnalysisWidget(ctk.CTkFrame):
         self._result_buffer = text
         self.html_renderer.set_content(text)
 
+        # Try to extract match criteria from the trailing JSON
+        criteria = _extract_match_criteria_from_html(text)
+        if criteria is not None:
+            self._current_match_criteria = criteria
+            self.match_criteria_editor.set_criteria(criteria, set_as_default=True)
+        else:
+            self._current_match_criteria = None
+            self.match_criteria_editor.set_criteria(MatchCriteria())
+
     def get_result(self) -> str:
         """获取结果内容。"""
         return self._result_buffer
+
+    def get_match_criteria(self) -> Optional[MatchCriteria]:
+        return self.match_criteria_editor.get_criteria()
+
+    def set_match_criteria(self, criteria: MatchCriteria):
+        self._current_match_criteria = criteria
+        self.match_criteria_editor.set_criteria(criteria, set_as_default=True)
 
     def set_analyzing(self, analyzing: bool):
         """设置分析状态。"""

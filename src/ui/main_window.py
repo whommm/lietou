@@ -1,5 +1,7 @@
 """主窗口 UI 模块。"""
 
+import json
+import re
 import threading
 import os
 from tkinter import TclError, messagebox
@@ -28,6 +30,7 @@ from ..core.llm_client import (
 from ..core.prompt import RESUME_MATCH_PROMPT
 from ..core.search_strategy_service import SearchStrategyService
 from ..core.search_task_repository import SearchTaskRepository
+from ..models import MatchCriteria
 from .batch_match_widget import BatchMatchWidget
 from ..utils.helpers import validate_api_key, validate_url
 from .candidate_library_widget import CandidateLibraryWidget
@@ -285,6 +288,7 @@ class MainWindow(ctk.CTk):
             on_send_to_candidates=self._send_analysis_to_candidates,
             on_pick_company_history=self._open_company_history_picker,
             on_history_changed=self._update_company_list,
+            on_save_match_criteria=self._on_save_match_criteria,
             theme=self.FIXED_THEME,
         )
         self.job_analysis_widget.grid(
@@ -509,6 +513,7 @@ class MainWindow(ctk.CTk):
             "job_description": record.jd_text,
             "analysis_result": record.result,
             "strategy": self.search_strategy_service.to_payload(strategy),
+            "match_criteria": record.match_criteria_json or "",
         }
 
     def _run_threaded_task(self, thread_attr: str, target, args: tuple):
@@ -516,6 +521,46 @@ class MainWindow(ctk.CTk):
         thread = threading.Thread(target=target, args=args, daemon=True)
         setattr(self, thread_attr, thread)
         thread.start()
+
+    @staticmethod
+    def _extract_match_criteria_json(html_text: str) -> str:
+        """Extract trailing JSON from analysis result if present."""
+        if not html_text:
+            return ""
+        for pattern in (
+            r"```json\s*(\{.*\})\s*```\s*$",
+            r"<(?:pre|code)[^>]*>(\{.*\})</(?:pre|code)>\s*$",
+            r"(\{.*\})\s*$",
+        ):
+            m = re.search(pattern, html_text, re.DOTALL | re.IGNORECASE)
+            if m:
+                try:
+                    data = json.loads(m.group(1))
+                    if isinstance(data, dict) and "core_requirements" in data:
+                        return m.group(1)
+                except (ValueError, TypeError):
+                    continue
+        return ""
+
+    def _on_save_match_criteria(self, criteria):
+        """Save edited match criteria to the latest job history record."""
+        if not self._raw_result or not self._current_jd:
+            return
+        target = None
+        for record in self.job_history_manager.get_all():
+            if record.jd_text == self._current_jd and record.result == self._raw_result:
+                target = record
+                break
+        if target is None:
+            target = self.job_history_manager.save_record(
+                self._current_jd, self._raw_result
+            )
+        target.match_criteria_json = json.dumps(criteria.to_dict(), ensure_ascii=False)
+        target.match_criteria_confirmed = True
+        self.job_history_manager.repository.upsert(target)
+        self._update_resume_job_list()
+        self._update_candidate_job_list()
+        self._update_batch_job_list()
 
     def _find_company_context(self, company_title: str) -> str:
         """根据选项名查找公司调研上下文。"""
@@ -547,9 +592,16 @@ class MainWindow(ctk.CTk):
 
         self.job_analysis_widget.set_result(self._raw_result)
         if self._current_jd and self._raw_result:
-            self.job_history_manager.save_record(self._current_jd, self._raw_result)
+            record = self.job_history_manager.save_record(
+                self._current_jd, self._raw_result
+            )
+            match_criteria_json = self._extract_match_criteria_json(self._raw_result)
+            if match_criteria_json:
+                record.match_criteria_json = match_criteria_json
+                self.job_history_manager.repository.upsert(record)
             self._update_resume_job_list()
             self._update_candidate_job_list()
+            self._update_batch_job_list()
         self._set_status("岗位分析完成，结果已保存到历史记录")
 
     def _start_resume_match(self):
@@ -938,12 +990,31 @@ class MainWindow(ctk.CTk):
             self.batch_match_widget.set_running(False)
             return
 
+        # Resolve match criteria from payload or history
+        match_criteria = None
+        mc_json = payload.get("match_criteria", "")
+        if mc_json:
+            try:
+                match_criteria = MatchCriteria.from_dict(json.loads(mc_json))
+            except (ValueError, TypeError):
+                match_criteria = None
+        if match_criteria is None:
+            record = self.job_history_manager.get_by_id(payload.get("record_id", ""))
+            if record and record.match_criteria_json:
+                try:
+                    match_criteria = MatchCriteria.from_dict(
+                        json.loads(record.match_criteria_json)
+                    )
+                except (ValueError, TypeError):
+                    match_criteria = None
+
+        max_workers = self.batch_match_widget.get_concurrency()
         self._set_status("已创建批量匹配任务，正在执行...")
         self._batch_match_cancel_event.clear()
         self._run_threaded_task(
             "_batch_match_thread",
             self._do_batch_match,
-            (url, key, model, payload, excel_path, candidates),
+            (url, key, model, payload, excel_path, candidates, match_criteria, max_workers),
         )
 
     def _do_batch_match(
@@ -954,14 +1025,22 @@ class MainWindow(ctk.CTk):
         payload: dict,
         excel_path: str,
         candidates: list,
+        match_criteria: Optional[MatchCriteria],
+        max_workers: int,
     ):
         """后台执行批量匹配任务。"""
         try:
-            llm_client = self._create_llm_client(url, key, model, 60)
-            service = BatchMatchService(None, llm_client)
+            client_factory = lambda: self._create_llm_client(url, key, model, 180)
+            service = BatchMatchService(
+                None,
+                llm_client=None,
+                llm_client_factory=client_factory,
+                max_workers=max_workers,
+            )
             results = service.match_excel_candidates(
                 payload["job_description"],
                 candidates,
+                match_criteria=match_criteria,
                 progress_callback=self._on_batch_match_progress,
             )
             if self._batch_match_cancel_event.is_set():
@@ -972,7 +1051,7 @@ class MainWindow(ctk.CTk):
                 self.candidate_excel_service.write_match_result(
                     excel_path,
                     result.row_index,
-                    result.score,
+                    result.tier,
                     result.detail,
                 )
                 result_payload.append(
@@ -980,11 +1059,15 @@ class MainWindow(ctk.CTk):
                         "result_id": str(result.row_index),
                         "candidate_id": str(result.row_index),
                         "candidate_name": result.candidate_name,
-                        "score": result.score if result.score is not None else "待解析",
+                        "tier": result.tier or "待解析",
+                        "core_met_count": result.core_met_count,
+                        "core_total": result.core_total,
+                        "dealbreaker_hit": result.dealbreaker_hit,
                         "recommendation": result.recommendation or "待解析",
                         "summary": result.summary or "",
                         "risks": result.risks or "",
                         "match_detail": result.detail,
+                        "inferred_abilities": result.inferred_abilities or "",
                     }
                 )
             summary_text = "批量匹配完成：共处理 {} 位候选人，结果已回写 Excel。\nExcel 文件：{}".format(
@@ -1064,7 +1147,10 @@ class MainWindow(ctk.CTk):
             excel_path,
             self.candidate_excel_service.count_matchable_candidates(excel_path),
         )
-        self.batch_match_widget.set_results(summary_text)
+        if results:
+            self.batch_match_widget.set_match_results(results)
+        else:
+            self.batch_match_widget.set_results(summary_text)
         self._set_status("批量匹配完成")
 
     def _on_import_candidate_excel(self):
@@ -1321,6 +1407,18 @@ class MainWindow(ctk.CTk):
                 list(candidate_map.keys()), candidate_map
             )
             self.batch_match_widget.job_combo.set(label)
+
+        # Also sync to job analysis widget if it has match criteria persisted
+        self._raw_result = record.result
+        self._current_jd = record.jd_text
+        self.job_analysis_widget.set_jd_text(record.jd_text)
+        self.job_analysis_widget.set_result(record.result)
+        if record.match_criteria_json:
+            try:
+                mc = MatchCriteria.from_dict(json.loads(record.match_criteria_json))
+                self.job_analysis_widget.set_match_criteria(mc)
+            except (ValueError, TypeError):
+                pass
 
     def _set_status(self, text: str):
         """设置状态栏文本。"""

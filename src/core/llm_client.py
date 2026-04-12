@@ -9,7 +9,7 @@ from openai import (
     APIConnectionError,
 )
 from typing import Optional
-from .prompt import SYSTEM_PROMPT
+from .prompt import SYSTEM_PROMPT, MATCH_CRITERIA_PROMPT_APPENDIX
 
 
 class LLMClientError(Exception):
@@ -98,7 +98,10 @@ class LLMClient:
         response = client.chat.completions.create(
             model=self.model_name,
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {
+                    "role": "system",
+                    "content": SYSTEM_PROMPT + MATCH_CRITERIA_PROMPT_APPENDIX,
+                },
                 {"role": "user", "content": user_message},
             ],
             temperature=0.7,

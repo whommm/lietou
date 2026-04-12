@@ -33,6 +33,7 @@ def test_batch_match_widget_updates_candidates_and_results():
     assert "demo.xlsx" in widget.excel_path_box.get("1.0", "end")
     assert "Excel" in widget.candidate_preview_label.cget("text")
     assert "批量匹配完成" in widget.summary_box.get("1.0", "end")
+    assert widget.get_concurrency() == 5
 
     widget.set_running(True)
     widget._on_cancel_batch_click()

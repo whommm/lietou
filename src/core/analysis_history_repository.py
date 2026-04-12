@@ -25,6 +25,8 @@ class AnalysisHistoryRepository:
             result=row["result"],
             created_at=row["created_at"],
             record_type=row["record_type"],
+            match_criteria_json=row["match_criteria_json"] or "",
+            match_criteria_confirmed=bool(row["match_criteria_confirmed"]),
         )
 
     def upsert(self, record):
@@ -36,7 +38,8 @@ class AnalysisHistoryRepository:
                 connection.execute(
                     """
                     UPDATE analysis_history
-                    SET title = ?, jd_text = ?, result = ?, created_at = ?, record_type = ?
+                    SET title = ?, jd_text = ?, result = ?, created_at = ?, record_type = ?,
+                        match_criteria_json = ?, match_criteria_confirmed = ?
                     WHERE id = ?
                     """,
                     (
@@ -45,6 +48,8 @@ class AnalysisHistoryRepository:
                         record.result,
                         record.created_at,
                         record.record_type,
+                        record.match_criteria_json,
+                        1 if record.match_criteria_confirmed else 0,
                         record.id,
                     ),
                 )
@@ -52,8 +57,9 @@ class AnalysisHistoryRepository:
                 connection.execute(
                     """
                     INSERT INTO analysis_history (
-                        id, title, jd_text, result, created_at, record_type
-                    ) VALUES (?, ?, ?, ?, ?, ?)
+                        id, title, jd_text, result, created_at, record_type,
+                        match_criteria_json, match_criteria_confirmed
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         record.id,
@@ -62,6 +68,8 @@ class AnalysisHistoryRepository:
                         record.result,
                         record.created_at,
                         record.record_type,
+                        record.match_criteria_json,
+                        1 if record.match_criteria_confirmed else 0,
                     ),
                 )
         return record

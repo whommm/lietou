@@ -27,6 +27,10 @@ class BatchMatchResult:
     batch_job_id: str
     candidate_id: str
     score: Optional[int] = None
+    tier: Optional[str] = None
+    core_met_count: int = 0
+    core_total: int = 0
+    dealbreaker_hit: bool = False
     recommendation: str = ""
     summary: str = ""
     risks: str = ""
