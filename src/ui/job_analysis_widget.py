@@ -245,7 +245,7 @@ class JobAnalysisWidget(ctk.CTkFrame):
         )
         result_frame.grid(row=0, column=1, padx=(5, 10), pady=10, sticky="nsew")
         result_frame.grid_columnconfigure(0, weight=1)
-        result_frame.grid_rowconfigure(2, weight=1)
+        result_frame.grid_rowconfigure(1, weight=1)
 
         header_frame = ctk.CTkFrame(result_frame, fg_color="transparent")
         header_frame.grid(row=0, column=0, padx=10, pady=(10, 5), sticky="ew")
@@ -300,18 +300,35 @@ class JobAnalysisWidget(ctk.CTkFrame):
         )
         self.clear_result_btn.pack(side="right", padx=5)
 
-        self.match_criteria_editor = MatchCriteriaEditor(
+        self.result_tabview = ctk.CTkTabview(
             result_frame,
+            corner_radius=18,
+            fg_color=colors["panel"],
+            border_width=1,
+            border_color=colors["border"],
+            segmented_button_fg_color=colors["secondary"],
+            segmented_button_selected_color=colors["accent"],
+            segmented_button_selected_hover_color=colors["accent_hover"],
+            segmented_button_unselected_color=colors["secondary"],
+            segmented_button_unselected_hover_color=colors["secondary_hover"],
+            text_color=colors["text"],
+        )
+        self.result_tabview.grid(row=1, column=0, padx=10, pady=(0, 10), sticky="nsew")
+
+        tab_result = self.result_tabview.add("分析结果")
+        tab_criteria = self.result_tabview.add("匹配条件")
+
+        self.html_renderer = HtmlRenderer(tab_result, theme=self.theme)
+        self.html_renderer.pack(fill="both", expand=True, padx=5, pady=5)
+
+        self.match_criteria_editor = MatchCriteriaEditor(
+            tab_criteria,
             criteria=MatchCriteria(),
             on_save=self._on_match_criteria_save,
             theme=self.theme,
         )
-        self.match_criteria_editor.grid(
-            row=1, column=0, padx=10, pady=(0, 5), sticky="ew"
-        )
+        self.match_criteria_editor.pack(fill="both", expand=True, padx=5, pady=5)
 
-        self.html_renderer = HtmlRenderer(result_frame, theme=self.theme)
-        self.html_renderer.grid(row=2, column=0, padx=10, pady=(0, 10), sticky="nsew")
         self._result_parent = result_frame
 
     def _on_analyze_click(self):
@@ -375,8 +392,7 @@ class JobAnalysisWidget(ctk.CTkFrame):
 
     def _show_history(self):
         """显示历史面板。"""
-        self.html_renderer.grid_forget()
-        self.match_criteria_editor.grid_forget()
+        self.result_tabview.grid_forget()
 
         if self.history_panel is None:
             self.history_panel = HistoryPanel(
@@ -388,7 +404,7 @@ class JobAnalysisWidget(ctk.CTkFrame):
         else:
             self.history_panel.refresh()
 
-        self.history_panel.grid(row=2, column=0, padx=10, pady=(0, 10), sticky="nsew")
+        self.history_panel.grid(row=1, column=0, padx=10, pady=(0, 10), sticky="nsew")
         self._showing_history = True
         self.history_btn.configure(text="返回")
 
@@ -396,10 +412,7 @@ class JobAnalysisWidget(ctk.CTkFrame):
         """隐藏历史面板。"""
         if self.history_panel:
             self.history_panel.grid_forget()
-        self.match_criteria_editor.grid(
-            row=1, column=0, padx=10, pady=(0, 5), sticky="ew"
-        )
-        self.html_renderer.grid(row=2, column=0, padx=10, pady=(0, 10), sticky="nsew")
+        self.result_tabview.grid(row=1, column=0, padx=10, pady=(0, 10), sticky="nsew")
         self._showing_history = False
         self.history_btn.configure(text="历史")
 
@@ -444,6 +457,7 @@ class JobAnalysisWidget(ctk.CTkFrame):
         if self._showing_history:
             self._hide_history()
         self._result_buffer = ""
+        self.result_tabview.set("分析结果")
         self.html_renderer.show_loading("job_analysis")
 
     def clear_result(self):
@@ -460,6 +474,7 @@ class JobAnalysisWidget(ctk.CTkFrame):
         if self._showing_history:
             self._hide_history()
         self._result_buffer = text
+        self.result_tabview.set("分析结果")
         self.html_renderer.set_content(text)
 
         # Try to extract match criteria from the trailing JSON
@@ -467,6 +482,7 @@ class JobAnalysisWidget(ctk.CTkFrame):
         if criteria is not None:
             self._current_match_criteria = criteria
             self.match_criteria_editor.set_criteria(criteria, set_as_default=True)
+            self.result_tabview.set("匹配条件")
         else:
             self._current_match_criteria = None
             self.match_criteria_editor.set_criteria(MatchCriteria())

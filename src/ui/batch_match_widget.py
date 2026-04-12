@@ -70,7 +70,7 @@ class BatchMatchWidget(ctk.CTkFrame):
 
     def _build_control_panel(self):
         colors = self.PALETTE[self.theme]
-        frame = ctk.CTkScrollableFrame(
+        frame = ctk.CTkFrame(
             self,
             corner_radius=24,
             fg_color=colors["panel"],
@@ -133,30 +133,28 @@ class BatchMatchWidget(ctk.CTkFrame):
 
         status_card = ctk.CTkFrame(
             frame,
-            corner_radius=18,
+            corner_radius=14,
             fg_color=colors["panel_alt"],
             border_width=1,
             border_color=colors["border"],
         )
         status_card.grid(row=4, column=0, padx=16, pady=(0, 10), sticky="ew")
-        status_card.grid_columnconfigure(0, weight=1)
 
+        status_header = ctk.CTkFrame(status_card, fg_color="transparent")
+        status_header.pack(fill="x", padx=12, pady=(10, 2))
         ctk.CTkLabel(
-            status_card,
+            status_header,
             text="Excel 状态",
-            font=ctk.CTkFont(size=14, weight="bold"),
+            font=ctk.CTkFont(size=12, weight="bold"),
             text_color=colors["text"],
-        ).grid(row=0, column=0, padx=14, pady=(14, 4), sticky="w")
-
+        ).pack(side="left")
         self.candidate_count_label = ctk.CTkLabel(
-            status_card,
+            status_header,
             text="当前未导入 Excel",
             text_color=colors["muted"],
-            anchor="w",
-            justify="left",
-            wraplength=260,
+            font=ctk.CTkFont(size=12),
         )
-        self.candidate_count_label.grid(row=1, column=0, padx=14, sticky="w")
+        self.candidate_count_label.pack(side="right")
 
         self.candidate_preview_label = ctk.CTkLabel(
             status_card,
@@ -165,32 +163,29 @@ class BatchMatchWidget(ctk.CTkFrame):
             anchor="w",
             justify="left",
             wraplength=260,
+            font=ctk.CTkFont(size=11),
         )
-        self.candidate_preview_label.grid(
-            row=2, column=0, padx=14, pady=(6, 14), sticky="w"
-        )
+        self.candidate_preview_label.pack(fill="x", padx=12, pady=(0, 10))
 
         concurrency_card = ctk.CTkFrame(
             frame,
-            corner_radius=18,
+            corner_radius=14,
             fg_color=colors["panel_alt"],
             border_width=1,
             border_color=colors["border"],
         )
         concurrency_card.grid(row=5, column=0, padx=16, pady=(0, 10), sticky="ew")
-        concurrency_card.grid_columnconfigure(0, weight=1)
-
-        ctk.CTkLabel(
-            concurrency_card,
-            text="并发数（同时请求 API 数量）",
-            font=ctk.CTkFont(size=12, weight="bold"),
-            text_color=colors["text"],
-        ).grid(row=0, column=0, padx=14, pady=(10, 2), sticky="w")
 
         slider_row = ctk.CTkFrame(concurrency_card, fg_color="transparent")
-        slider_row.grid(row=1, column=0, padx=14, pady=(2, 10), sticky="ew")
-        slider_row.grid_columnconfigure(1, weight=1)
+        slider_row.pack(fill="x", padx=12, pady=10)
+        slider_row.grid_columnconfigure(2, weight=1)
 
+        ctk.CTkLabel(
+            slider_row,
+            text="并发数",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color=colors["text"],
+        ).grid(row=0, column=0, padx=(0, 8))
         self.concurrency_label = ctk.CTkLabel(
             slider_row,
             text="5",
@@ -198,8 +193,7 @@ class BatchMatchWidget(ctk.CTkFrame):
             text_color=colors["text"],
             font=ctk.CTkFont(size=12, weight="bold"),
         )
-        self.concurrency_label.grid(row=0, column=0, padx=(0, 8))
-
+        self.concurrency_label.grid(row=0, column=1, padx=(0, 8))
         self.concurrency_slider = ctk.CTkSlider(
             slider_row,
             from_=1,
@@ -212,7 +206,7 @@ class BatchMatchWidget(ctk.CTkFrame):
             button_hover_color=colors["accent_hover"],
         )
         self.concurrency_slider.set(5)
-        self.concurrency_slider.grid(row=0, column=1, sticky="ew")
+        self.concurrency_slider.grid(row=0, column=2, sticky="ew")
         self.concurrency_slider.bind(
             "<ButtonRelease-1>", self._on_concurrency_change
         )

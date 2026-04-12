@@ -142,7 +142,7 @@ class CandidateLibraryWidget(ctk.CTkFrame):
 
     def _build_control_panel(self):
         colors = self.PALETTE[self.theme]
-        frame = ctk.CTkScrollableFrame(
+        frame = ctk.CTkFrame(
             self,
             corner_radius=24,
             fg_color=colors["panel"],
@@ -204,37 +204,8 @@ class CandidateLibraryWidget(ctk.CTkFrame):
         )
         self.pick_job_btn.grid(row=0, column=1, padx=(10, 0), sticky="e")
 
-        ctk.CTkLabel(frame, text="搜索词预览", text_color=colors["text"]).grid(
-            row=4, column=0, padx=16, pady=(6, 6), sticky="w"
-        )
-        self.strategy_box = ctk.CTkTextbox(
-            frame,
-            height=160,
-            wrap="word",
-            corner_radius=18,
-            border_width=1,
-            border_color=colors["border"],
-            fg_color=colors["panel_alt"],
-            text_color=colors["text"],
-            scrollbar_button_color=colors["accent"],
-            scrollbar_button_hover_color=colors["accent_hover"],
-        )
-        self.strategy_box.grid(row=5, column=0, padx=16, pady=(0, 10), sticky="ew")
-
-        self.save_strategy_btn = ctk.CTkButton(
-            frame,
-            text="保存搜索词修改",
-            height=34,
-            corner_radius=16,
-            fg_color=colors["secondary"],
-            hover_color=colors["secondary_hover"],
-            text_color=colors["text"],
-            command=self._save_strategy_changes,
-        )
-        self.save_strategy_btn.grid(row=6, column=0, padx=16, pady=(0, 10), sticky="e")
-
         limit_frame = ctk.CTkFrame(frame, fg_color="transparent")
-        limit_frame.grid(row=7, column=0, padx=16, pady=(0, 12), sticky="ew")
+        limit_frame.grid(row=4, column=0, padx=16, pady=(0, 10), sticky="ew")
         limit_frame.grid_columnconfigure((0, 1), weight=1)
 
         limit_card_left = ctk.CTkFrame(
@@ -284,6 +255,35 @@ class CandidateLibraryWidget(ctk.CTkFrame):
         )
         self.max_pages_entry.pack(fill="x", padx=12, pady=(0, 10))
         self.max_pages_entry.insert(0, "1")
+
+        ctk.CTkLabel(frame, text="搜索词预览", text_color=colors["text"]).grid(
+            row=5, column=0, padx=16, pady=(6, 6), sticky="w"
+        )
+        self.strategy_box = ctk.CTkTextbox(
+            frame,
+            height=110,
+            wrap="word",
+            corner_radius=18,
+            border_width=1,
+            border_color=colors["border"],
+            fg_color=colors["panel_alt"],
+            text_color=colors["text"],
+            scrollbar_button_color=colors["accent"],
+            scrollbar_button_hover_color=colors["accent_hover"],
+        )
+        self.strategy_box.grid(row=6, column=0, padx=16, pady=(0, 10), sticky="ew")
+
+        self.save_strategy_btn = ctk.CTkButton(
+            frame,
+            text="保存搜索词修改",
+            height=34,
+            corner_radius=16,
+            fg_color=colors["secondary"],
+            hover_color=colors["secondary_hover"],
+            text_color=colors["text"],
+            command=self._save_strategy_changes,
+        )
+        self.save_strategy_btn.grid(row=7, column=0, padx=16, pady=(0, 16), sticky="e")
 
     def _build_status_panel(self):
         colors = self.PALETTE[self.theme]

@@ -132,9 +132,8 @@ class MainWindow(ctk.CTk):
             border_color=colors["panel_edge"],
         )
         config_frame.grid(row=0, column=0, padx=14, pady=(14, 6), sticky="ew")
-        config_frame.grid_columnconfigure(1, weight=1)
-        config_frame.grid_columnconfigure(3, weight=1)
-        config_frame.grid_columnconfigure(8, weight=1)
+        config_frame.grid_columnconfigure(1, weight=2)
+        config_frame.grid_columnconfigure(3, weight=3)
 
         title_frame = ctk.CTkFrame(config_frame, fg_color="transparent")
         title_frame.grid(
@@ -163,7 +162,7 @@ class MainWindow(ctk.CTk):
             text_color=colors["text"],
             font=ctk.CTkFont(size=11, weight="bold"),
         )
-        badge.grid(row=0, column=8, padx=(10, 16), pady=(16, 6), sticky="e")
+        badge.grid(row=0, column=4, padx=(10, 16), pady=(16, 6), sticky="e")
 
         ctk.CTkLabel(config_frame, text="API 地址:").grid(
             row=1, column=0, padx=(16, 5), pady=10, sticky="w"
@@ -195,7 +194,7 @@ class MainWindow(ctk.CTk):
         self.key_entry.grid(row=1, column=3, padx=5, pady=10, sticky="ew")
 
         ctk.CTkLabel(config_frame, text="模型:").grid(
-            row=1, column=4, padx=(20, 5), pady=10, sticky="w"
+            row=2, column=0, padx=(16, 5), pady=(0, 16), sticky="w"
         )
         self.model_entry = ctk.CTkEntry(
             config_frame,
@@ -207,7 +206,24 @@ class MainWindow(ctk.CTk):
             border_color=colors["panel_edge"],
             text_color=colors["text"],
         )
-        self.model_entry.grid(row=1, column=5, padx=5, pady=10)
+        self.model_entry.grid(row=2, column=1, padx=5, pady=(0, 16), sticky="w")
+
+        ctk.CTkLabel(config_frame, text="Tavily Key:").grid(
+            row=2, column=2, padx=(20, 5), pady=(0, 16), sticky="w"
+        )
+        self.tavily_key_entry = ctk.CTkEntry(
+            config_frame,
+            placeholder_text="tvly-xxx... (用于公司调研)",
+            show="*",
+            corner_radius=16,
+            height=36,
+            fg_color=colors["panel_alt"],
+            border_color=colors["panel_edge"],
+            text_color=colors["text"],
+        )
+        self.tavily_key_entry.grid(
+            row=2, column=3, padx=5, pady=(0, 16), sticky="ew"
+        )
 
         self.save_btn = ctk.CTkButton(
             config_frame,
@@ -221,24 +237,7 @@ class MainWindow(ctk.CTk):
             font=ctk.CTkFont(size=12, weight="bold"),
             command=self._on_save_config,
         )
-        self.save_btn.grid(row=1, column=6, padx=(20, 10), pady=10)
-
-        ctk.CTkLabel(config_frame, text="Tavily Key:").grid(
-            row=2, column=0, padx=(16, 5), pady=(0, 16), sticky="w"
-        )
-        self.tavily_key_entry = ctk.CTkEntry(
-            config_frame,
-            placeholder_text="tvly-xxx... (用于公司调研)",
-            show="*",
-            corner_radius=16,
-            height=36,
-            fg_color=colors["panel_alt"],
-            border_color=colors["panel_edge"],
-            text_color=colors["text"],
-        )
-        self.tavily_key_entry.grid(
-            row=2, column=1, columnspan=7, padx=(5, 16), pady=(0, 16), sticky="ew"
-        )
+        self.save_btn.grid(row=2, column=4, padx=(20, 10), pady=(0, 16))
 
         for label in config_frame.winfo_children():
             if isinstance(label, ctk.CTkLabel) and label not in (badge,):
