@@ -29,7 +29,7 @@ def test_batch_match_widget_updates_candidates_and_results():
     widget.set_results("批量匹配完成")
     widget.set_excel_file("E:/Lietou/exports/candidates/demo.xlsx", matchable_count=1)
 
-    assert widget.job_combo.get() == "算法岗 [01-01 10:00]"
+    assert widget.job_display.get() == "算法岗 [01-01 10:00]"
     assert "demo.xlsx" in widget.excel_path_box.get("1.0", "end")
     assert "Excel" in widget.candidate_preview_label.cget("text")
     assert "批量匹配完成" in widget.summary_box.get("1.0", "end")

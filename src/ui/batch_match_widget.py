@@ -43,6 +43,7 @@ class BatchMatchWidget(ctk.CTkFrame):
         self.job_options: List[str] = ["请先分析岗位"]
         self.job_data_map: Dict[str, Dict[str, object]] = {}
         self._excel_file_path: str = ""
+        self._current_task_id: Optional[str] = None
 
         self._setup_ui()
 
@@ -345,8 +346,7 @@ class BatchMatchWidget(ctk.CTkFrame):
         if not self._excel_file_path:
             messagebox.showwarning("提示", "请先导入候选人 Excel")
             return
-        self.set_running(True)
-        self._set_summary_text("正在执行批量匹配，请稍候...")
+        self._set_summary_text("正在将任务提交到后台队列...")
         self.on_run_batch(job_label, payload)
 
     def _on_cancel_batch_click(self):
@@ -386,19 +386,13 @@ class BatchMatchWidget(ctk.CTkFrame):
         self.job_display.insert(0, job_label)
         self.job_display.configure(state="readonly")
 
-    def set_running(self, running: bool):
-        state = "disabled" if running else "normal"
-        self.job_display.configure(state=state)
-        self.pick_job_btn.configure(state=state)
-        self.import_excel_btn.configure(state=state)
-        self.open_excel_btn.configure(state=state)
-        self.open_excel_dir_btn.configure(state=state)
-        self.concurrency_slider.configure(state=state)
-        self.run_batch_btn.configure(
-            state=state,
-            text="批量匹配中..." if running else "开始批量匹配",
+    def set_running(self, running: bool, task_id: Optional[str] = None):
+        if running and task_id:
+            self._current_task_id = task_id
+        self.run_batch_btn.configure(text="开始批量匹配")
+        self.cancel_batch_btn.configure(
+            state="normal" if running else "disabled"
         )
-        self.cancel_batch_btn.configure(state="normal" if running else "disabled")
 
     def set_results(self, info_text: str):
         self._set_summary_text(info_text)
@@ -465,6 +459,9 @@ class BatchMatchWidget(ctk.CTkFrame):
 
     def get_excel_file(self) -> str:
         return self._excel_file_path
+
+    def get_current_task_id(self) -> Optional[str]:
+        return self._current_task_id
 
     def _set_summary_text(self, text: str):
         self.summary_box.delete("1.0", "end")

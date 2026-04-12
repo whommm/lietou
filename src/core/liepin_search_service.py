@@ -1,6 +1,7 @@
 """Liepin search execution and result list extraction."""
 
 import logging
+import re
 from dataclasses import dataclass
 from typing import Callable
 from typing import List
@@ -29,6 +30,7 @@ class LiepinSearchCandidate:
     """Candidate summary captured from the result list page."""
 
     name: str = ""
+    age: str = ""
     current_title: str = ""
     current_company: str = ""
     city: str = ""
@@ -300,8 +302,28 @@ class LiepinSearchService:
             raise last_error
         raise LiepinSearchPageChangedError("搜索执行失败，未找到有效的关键词输入框")
 
+    # Regex patterns for structured field extraction from result-card text
+    _AGE_PATTERN = re.compile(r"(\d+岁)")
+    _EDUCATION_PATTERN = re.compile(r"(本科|硕士|博士|大专|中专|高中|初中)")
+    _WORK_YEARS_PATTERN = re.compile(r"(?:工作)?(\d+年(?:经验)?)")
+    _SALARY_PATTERN = re.compile(r"\d+k(?:-\d+k)?")
+    _COMPANY_MARKERS = (
+        "有限公司", "有限责任公司", "股份公司", "公司", "集团", "研究院", "研究所", "事务所", "中心"
+    )
+    _JOB_KEYWORDS = (
+        "工程师", "经理", "总监", "主管", "专员", "顾问", "设计师", "开发", "运营", "产品经理",
+        "销售", "教师", "医生", "护士", "会计", "人事", "行政", "财务", "采购", "物流",
+        "翻译", "记者", "律师", "研究员", "分析师", "架构师", "测试", "运维", "前端", "后端",
+        "算法", "数据", "市场", "品牌", "公关", "助理", "秘书", "客服", "技术支持", "项目管理",
+        "生产", "质量", "工艺", "制造", "设备", "机械", "电气", "自动化", "材料", "化工",
+    )
+    _PERSONAL_TAGS = ("男", "女", "已婚", "未婚", "共青团员", "党员", "群众", "预备党员", "民主党派")
+
     def _clean_candidate_lines(self, lines: List[str]) -> tuple:
-        """Remove UI noise and return (cleaned_lines, name, title, company)."""
+        """Remove UI noise and extract structured fields from result-card text.
+
+        Returns (cleaned_lines, name, age, title, company, city, work_years, education).
+        """
         cleaned = []
         for line in lines:
             line = line.strip()
@@ -312,10 +334,121 @@ class LiepinSearchService:
             if any(marker in line for marker in self.FILTER_CARD_MARKERS):
                 continue
             cleaned.append(line)
-        name = cleaned[0] if cleaned else ""
-        title = cleaned[1] if len(cleaned) > 1 else ""
-        company = cleaned[2] if len(cleaned) > 2 else ""
-        return cleaned, name, title, company
+
+        if not cleaned:
+            return [], "", "", "", "", "", "", ""
+
+        name = cleaned[0]
+        age = ""
+        education = ""
+        work_years = ""
+        city = ""
+        title = ""
+        company = ""
+
+        full_text = " ".join(cleaned)
+
+        # Extract age / education / work_years globally
+        m = self._AGE_PATTERN.search(full_text)
+        if m:
+            age = m.group(1)
+
+        m = self._EDUCATION_PATTERN.search(full_text)
+        if m:
+            education = m.group(1)
+
+        m = self._WORK_YEARS_PATTERN.search(full_text)
+        if m:
+            work_years = m.group(1)
+
+        # Identify company name
+        company_line_idx = -1
+        for i, line in enumerate(cleaned):
+            for marker in self._COMPANY_MARKERS:
+                idx = line.find(marker)
+                if idx != -1:
+                    company_line_idx = i
+                    if idx > 0:
+                        potential_title = line[:idx].strip()
+                        if len(potential_title) >= 2:
+                            title = potential_title
+                    company = line[idx:].strip()
+                    break
+            if company_line_idx != -1:
+                break
+
+        # Fallback: third line is likely the company if no marker matched
+        if company_line_idx == -1 and len(cleaned) >= 3:
+            candidate = cleaned[2]
+            if not re.search(r"\d岁|\d+年(?:经验)?|本科|硕士|博士|大专", candidate):
+                company = candidate
+                company_line_idx = 2
+
+        # Identify city from the compressed personal-info line
+        for line in cleaned:
+            has_personal = False
+            temp = line
+            if age and age in temp:
+                temp = temp.replace(age, "")
+                has_personal = True
+            if education and education in temp:
+                temp = temp.replace(education, "")
+                has_personal = True
+            if work_years and work_years in temp:
+                temp = temp.replace(work_years, "")
+                has_personal = True
+            if has_personal or self._SALARY_PATTERN.search(temp):
+                temp = self._SALARY_PATTERN.sub("", temp)
+                temp = re.sub(r"^(男|女)\s*", "", temp)
+                for tag in self._PERSONAL_TAGS:
+                    temp = temp.replace(tag, "")
+                temp = temp.replace(" ", "").strip()
+                if 2 <= len(temp) <= 5 and temp not in (name, title, company) and not re.search(r"\d", temp):
+                    city = temp
+                    break
+
+        # Identify title if not already extracted from a combined line
+        if not title:
+            for i, line in enumerate(cleaned):
+                if i == 0 or i == company_line_idx:
+                    continue
+                temp = line
+                for val in (age, education, work_years, city):
+                    if val:
+                        temp = temp.replace(val, "")
+                temp = self._SALARY_PATTERN.sub("", temp)
+                temp = re.sub(r"^(男|女)\s*", "", temp)
+                for tag in self._PERSONAL_TAGS:
+                    temp = temp.replace(tag, "")
+                temp = temp.strip()
+                if len(temp) < 2:
+                    continue
+                for kw in self._JOB_KEYWORDS:
+                    if kw in temp:
+                        title = line.strip()
+                        break
+                if title:
+                    break
+
+        # Fallback: first meaningful non-name / non-company line as title
+        if not title:
+            for i, line in enumerate(cleaned):
+                if i == 0 or i == company_line_idx:
+                    continue
+                temp = line
+                for val in (age, education, work_years, city):
+                    if val:
+                        temp = temp.replace(val, "")
+                temp = self._SALARY_PATTERN.sub("", temp)
+                temp = re.sub(r"^(男|女)\s*", "", temp)
+                for tag in self._PERSONAL_TAGS:
+                    temp = temp.replace(tag, "")
+                temp = temp.strip()
+                if len(temp) >= 2:
+                    title = line.strip()
+                    break
+
+        return cleaned, name, age, title, company, city, work_years, education
 
     def extract_candidates_from_page(self, page: Page) -> List[LiepinSearchCandidate]:
         """Parse summary cards from the current result page."""
@@ -340,14 +473,18 @@ class LiepinSearchService:
                 continue
 
             lines = [line.strip() for line in text.splitlines() if line.strip()]
-            cleaned, name, title, company = self._clean_candidate_lines(lines)
+            cleaned, name, age, title, company, city, work_years, education = self._clean_candidate_lines(lines)
             if not name:
                 logger.warning("extract_candidates_from_page: skipping card with no valid name")
                 continue
             candidate = LiepinSearchCandidate(
                 name=name,
+                age=age,
                 current_title=title,
                 current_company=company,
+                city=city,
+                work_years=work_years,
+                education=education,
                 summary="\n".join(cleaned[:8]),
                 profile_url=profile_url,
                 result_index=len(candidates),
@@ -532,15 +669,19 @@ class LiepinSearchService:
             lines = row.get("lines") or []
             if not lines:
                 continue
-            cleaned, name, title, company = self._clean_candidate_lines(lines)
+            cleaned, name, age, title, company, city, work_years, education = self._clean_candidate_lines(lines)
             if not name:
                 logger.warning("DOM fallback: skipping container with no valid name after cleaning, raw_first_line=%s", lines[0] if lines else "")
                 continue
             candidates.append(
                 LiepinSearchCandidate(
                     name=name,
+                    age=age,
                     current_title=title,
                     current_company=company,
+                    city=city,
+                    work_years=work_years,
+                    education=education,
                     summary="\n".join(cleaned[:8]),
                     profile_url=row.get("href") or "",
                     result_index=len(candidates),
@@ -562,6 +703,11 @@ class LiepinSearchService:
             return "https://h.liepin.com" + url
         return url
 
+    @staticmethod
+    def _is_detail_page_url(url: str) -> bool:
+        normalized = (url or "").lower()
+        return "showresumedetail" in normalized or "/resume/" in normalized
+
     def open_candidate_detail(self, page: Page, candidate: LiepinSearchCandidate):
         """Open one candidate detail page and return the active detail page."""
         import logging
@@ -571,18 +717,36 @@ class LiepinSearchService:
         if profile_url:
             # 优先在新标签页打开，避免覆盖搜索结果页
             start = time.time()
+            detail_page = None
             try:
                 detail_page = self.browser_manager.new_page()
                 detail_page.goto(profile_url, wait_until="domcontentloaded", timeout=15000)
-                logger.warning("open_candidate_detail: opened in new tab elapsed=%.2fs url=%s", time.time() - start, profile_url[:120])
+                # 校验是否被重定向到找人/搜索页（常见于浏览器启动后的前几次访问）
+                if not self._is_detail_page_url(detail_page.url or ""):
+                    logger.warning("open_candidate_detail: redirected after domcontentloaded, waiting for stabilization")
+                    # 短暂等待页面稳定
+                    detail_page.wait_for_timeout(1200)
+                    if not self._is_detail_page_url(detail_page.url or ""):
+                        logger.warning("open_candidate_detail: still not detail page after wait, retrying with networkidle")
+                        detail_page.goto(profile_url, wait_until="networkidle", timeout=15000)
+                logger.warning("open_candidate_detail: opened in new tab elapsed=%.2fs url=%s", time.time() - start, (detail_page.url or profile_url)[:120])
                 return detail_page
             except Exception as exc:
                 logger.warning("open_candidate_detail: new tab failed elapsed=%.2fs url=%s error=%s", time.time() - start, profile_url[:120], exc)
+                if detail_page is not None and detail_page is not page:
+                    try:
+                        detail_page.close()
+                    except Exception:
+                        pass
                 # 降级：在当前页打开
             start = time.time()
             try:
                 page.goto(profile_url, wait_until="domcontentloaded", timeout=15000)
-                logger.warning("open_candidate_detail: opened in current tab elapsed=%.2fs url=%s", time.time() - start, profile_url[:120])
+                if not self._is_detail_page_url(page.url or ""):
+                    page.wait_for_timeout(1200)
+                    if not self._is_detail_page_url(page.url or ""):
+                        page.goto(profile_url, wait_until="networkidle", timeout=15000)
+                logger.warning("open_candidate_detail: opened in current tab elapsed=%.2fs url=%s", time.time() - start, (page.url or profile_url)[:120])
             except Exception as exc:
                 logger.warning("open_candidate_detail: current tab also failed elapsed=%.2fs url=%s error=%s", time.time() - start, profile_url[:120], exc)
                 raise

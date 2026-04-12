@@ -30,6 +30,7 @@ class CandidateLibraryWidget(ctk.CTkFrame):
         on_open_excel: Optional[Callable] = None,
         on_open_excel_dir: Optional[Callable] = None,
         on_export_debug: Optional[Callable] = None,
+        on_close_browser: Optional[Callable] = None,
         on_pick_job_history: Optional[Callable] = None,
         theme: str = "light",
         **kwargs,
@@ -42,6 +43,7 @@ class CandidateLibraryWidget(ctk.CTkFrame):
         self.on_open_excel = on_open_excel
         self.on_open_excel_dir = on_open_excel_dir
         self.on_export_debug = on_export_debug
+        self.on_close_browser = on_close_browser
         self.on_pick_job_history = on_pick_job_history
         self.theme = theme
 
@@ -51,6 +53,7 @@ class CandidateLibraryWidget(ctk.CTkFrame):
         self.task_id: str = ""
         self._excel_file_path: str = ""
         self._candidate_records: List[Dict] = []
+        self._current_task_id: Optional[str] = None
 
         self._setup_ui()
 
@@ -74,7 +77,7 @@ class CandidateLibraryWidget(ctk.CTkFrame):
             border_color=colors["border"],
         )
         frame.grid(row=0, column=0, columnspan=2, padx=10, pady=(10, 6), sticky="ew")
-        frame.grid_columnconfigure((0, 1, 2, 3), weight=1)
+        frame.grid_columnconfigure((0, 1, 2, 3, 4), weight=1)
 
         self.launch_browser_btn = ctk.CTkButton(
             frame,
@@ -90,6 +93,18 @@ class CandidateLibraryWidget(ctk.CTkFrame):
             row=0, column=0, padx=(14, 6), pady=14, sticky="ew"
         )
 
+        self.close_browser_btn = ctk.CTkButton(
+            frame,
+            text="关闭浏览器",
+            height=40,
+            corner_radius=18,
+            fg_color=colors["secondary"],
+            hover_color=colors["secondary_hover"],
+            text_color=colors["text"],
+            command=self._on_close_browser_click,
+        )
+        self.close_browser_btn.grid(row=0, column=1, padx=6, pady=14, sticky="ew")
+
         self.check_login_btn = ctk.CTkButton(
             frame,
             text="检查登录状态",
@@ -100,7 +115,7 @@ class CandidateLibraryWidget(ctk.CTkFrame):
             text_color=colors["text"],
             command=self.on_check_login,
         )
-        self.check_login_btn.grid(row=0, column=1, padx=6, pady=14, sticky="ew")
+        self.check_login_btn.grid(row=0, column=2, padx=6, pady=14, sticky="ew")
 
         self.run_task_btn = ctk.CTkButton(
             frame,
@@ -113,7 +128,7 @@ class CandidateLibraryWidget(ctk.CTkFrame):
             font=ctk.CTkFont(size=12, weight="bold"),
             command=self._on_run_task_click,
         )
-        self.run_task_btn.grid(row=0, column=2, padx=6, pady=14, sticky="ew")
+        self.run_task_btn.grid(row=0, column=3, padx=6, pady=14, sticky="ew")
 
         self.debug_btn = ctk.CTkButton(
             frame,
@@ -125,7 +140,7 @@ class CandidateLibraryWidget(ctk.CTkFrame):
             text_color=colors["text"],
             command=self._on_export_debug_click,
         )
-        self.debug_btn.grid(row=0, column=3, padx=(6, 14), pady=14, sticky="ew")
+        self.debug_btn.grid(row=0, column=4, padx=(6, 14), pady=14, sticky="ew")
 
     def _build_control_panel(self):
         colors = self.PALETTE
@@ -394,13 +409,16 @@ class CandidateLibraryWidget(ctk.CTkFrame):
         if max_candidates <= 0 or max_pages <= 0:
             messagebox.showwarning("提示", "抓取人数上限和页数必须大于 0")
             return
-        self.set_running(True)
-        self._set_info_text("正在抓取猎聘当前结果页并写入 Excel，请稍候...")
+        self._set_info_text("正在将抓取任务提交到后台队列...")
         self.on_run_task(job_label, payload, max_candidates, max_pages)
 
     def _on_export_debug_click(self):
         if self.on_export_debug:
             self.on_export_debug()
+
+    def _on_close_browser_click(self):
+        if self.on_close_browser:
+            self.on_close_browser()
 
     def _on_import_excel_click(self):
         if self.on_import_excel:
@@ -429,22 +447,13 @@ class CandidateLibraryWidget(ctk.CTkFrame):
         self.job_display.configure(state="readonly")
         self._on_job_selected(job_label)
 
-    def set_running(self, running: bool):
-        state = "disabled" if running else "normal"
-        self.launch_browser_btn.configure(state=state)
-        self.check_login_btn.configure(state=state)
+    def set_running(self, running: bool, task_id: Optional[str] = None):
+        if running and task_id:
+            self._current_task_id = task_id
         self.run_task_btn.configure(
-            state=state,
+            state="disabled" if running else "normal",
             text="抓取中..." if running else "开始抓取并写入 Excel",
         )
-        self.import_excel_btn.configure(state=state)
-        self.open_excel_btn.configure(state=state)
-        self.open_excel_dir_btn.configure(state=state)
-        self.debug_btn.configure(state=state)
-        self.pick_job_btn.configure(state=state)
-        self.job_display.configure(state=state)
-        self.max_candidates_entry.configure(state=state)
-        self.max_pages_entry.configure(state=state)
 
     def set_browser_state(self, text: str):
         self.info_label.configure(text=text)
@@ -464,6 +473,9 @@ class CandidateLibraryWidget(ctk.CTkFrame):
 
     def get_excel_file(self) -> str:
         return self._excel_file_path
+
+    def get_current_task_id(self) -> Optional[str]:
+        return self._current_task_id
 
     def _set_info_text(self, text: str):
         self.info_box.delete("1.0", "end")
@@ -485,10 +497,8 @@ class CandidateLibraryWidget(ctk.CTkFrame):
         for rec in self._candidate_records:
             status = rec.get("capture_status", "未知")
             lines.append(
-                "- {} | {} @ {} [{}]".format(
+                "- {} [{}]".format(
                     rec.get("name") or "未命名",
-                    rec.get("current_title") or "",
-                    rec.get("current_company") or "",
                     status,
                 )
             )

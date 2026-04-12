@@ -43,7 +43,7 @@ class LiepinSearchTaskService:
         self.search_service = search_service
         self.resume_extractor = resume_extractor
 
-    def run_task(self, task_id: str) -> SearchTaskExecutionSummary:
+    def run_task(self, task_id: str, cancel_event=None) -> SearchTaskExecutionSummary:
         """Import candidates from the current result page into local storage."""
         task = self.task_repository.get_by_id(task_id)
         if task is None:
@@ -65,6 +65,8 @@ class LiepinSearchTaskService:
             )
             logger.warning("[run_task] task=%s max_pages=%s max_candidates=%s", task.id, task.max_pages, task.max_candidates)
             for page_number in range(1, max(1, task.max_pages) + 1):
+                if cancel_event and cancel_event.is_set():
+                    raise RuntimeError("用户已取消任务")
                 self.task_repository.update_status(
                     task.id,
                     "running",
@@ -75,6 +77,8 @@ class LiepinSearchTaskService:
                 logger.warning("[run_task] page=%s extracted_candidates=%s", page_number, len(candidates))
 
                 for rank_index, candidate_summary in enumerate(candidates, start=1):
+                    if cancel_event and cancel_event.is_set():
+                        raise RuntimeError("用户已取消任务")
                     if summary.sourced_candidate_count >= task.max_candidates:
                         logger.warning("[run_task] reached max_candidates=%s, stopping", task.max_candidates)
                         break
@@ -185,12 +189,18 @@ class LiepinSearchTaskService:
         )
 
         try:
+            import random
+            # Light anti-bot jitter: 0.3~1.2s before opening each detail
+            time.sleep(random.uniform(0.3, 1.2))
 
             def _extract(page):
                 detail_page = self.search_service.open_candidate_detail(
                     page, candidate_summary
                 )
                 try:
+                    # Brief pause to let dynamic content settle and reduce bot signals
+                    import random
+                    time.sleep(random.uniform(0.5, 1.0))
                     return self.resume_extractor.extract_candidate(
                         detail_page, candidate_summary
                     )
@@ -269,13 +279,7 @@ class LiepinSearchTaskService:
             {
                 "序号": summary.sourced_candidate_count + 1,
                 "姓名": candidate_summary.name or "",
-                "年龄": "",
-                "当前岗位": candidate_summary.current_title or "",
-                "当前公司": candidate_summary.current_company or "",
-                "城市": candidate_summary.city or "",
-                "工作年限": candidate_summary.work_years or "",
-                "学历": candidate_summary.education or "",
-                "来源关键词": keyword or "",
+                "年龄": candidate_summary.age or "",
                 "页码": page_number,
                 "排名": rank_index,
                 "简历链接": candidate_summary.profile_url or "",

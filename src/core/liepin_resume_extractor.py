@@ -93,6 +93,25 @@ class LiepinResumeExtractor:
             raw_payload_json=json.dumps(sections, ensure_ascii=False),
         )
 
+    SEARCH_PAGE_MARKERS = (
+        "筛选条件", "找人", "交换电话", "立即沟通", "意向沟通",
+        "全选", "包含全部关键词", "没找到相关匹配项",
+        "上一页", "下一页", "页",
+    )
+    RESUME_PAGE_MARKERS = (
+        "工作经历", "教育经历", "项目经历", "自我评价",
+        "工作职责", "工作业绩", "在职时间",
+        "本科", "硕士", "博士", "大专", "中专",
+    )
+
+    def _looks_like_search_page(self, lines: List[str]) -> bool:
+        """Heuristic to detect whether the detail page was redirected to search."""
+        text = "\n".join(lines)
+        search_hits = sum(1 for marker in self.SEARCH_PAGE_MARKERS if marker in text)
+        resume_hits = sum(1 for marker in self.RESUME_PAGE_MARKERS if marker in text)
+        # If it looks like a search page and lacks resume markers, treat as redirect
+        return search_hits >= 3 and resume_hits < 2
+
     def extract_sections(self, page: Page) -> Dict[str, List[str]]:
         """Extract all structured sections from the current page."""
         sections = {
@@ -108,6 +127,8 @@ class LiepinResumeExtractor:
             logger.warning("liepin_resume_extractor: structured selectors returned empty, falling back to body text")
             fallback = self._extract_first_section(page, ["body"])
             if fallback:
+                if self._looks_like_search_page(fallback):
+                    raise LiepinResumeExtractionError("当前页面被重定向到找人/搜索页，未获取到简历内容")
                 sections["basic_info"] = fallback
                 return sections
             raise LiepinResumeExtractionError("未提取到简历详情内容，请检查详情页结构")

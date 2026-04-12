@@ -15,9 +15,7 @@ def test_candidate_excel_service_creates_and_reads_workbook(tmp_path):
         {
             "序号": 1,
             "姓名": "张三",
-            "当前岗位": "后端工程师",
-            "当前公司": "字节跳动",
-            "来源关键词": "后端工程师",
+            "年龄": "30岁",
             "页码": 1,
             "排名": 2,
             "简历链接": "https://example.com/resume/1",
@@ -37,6 +35,7 @@ def test_candidate_excel_service_creates_and_reads_workbook(tmp_path):
     assert len(records) == 1
     assert records[0].row_index == row_index
     assert records[0].name == "张三"
+    assert records[0].age == "30岁"
     assert records[0].capture_status == service.CAPTURE_STATUS_SUCCESS
     assert records[0].resume_text == "这是简历正文"
 

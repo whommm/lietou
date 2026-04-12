@@ -251,6 +251,81 @@ class LiepinBrowserManager:
         self._page = self._pick_best_page(list(self._context.pages), self._page)
         return self._page
 
+    def _apply_stealth_locked(self, page: Page) -> None:
+        """Inject minimal anti-detection scripts without breaking site rendering."""
+        if page is None:
+            return
+        try:
+            if getattr(page, "_liepin_stealth_applied", False):
+                return
+            page.add_init_script(
+                r"""
+                (() => {
+                    // 1. Hide webdriver flag
+                    Object.defineProperty(navigator, 'webdriver', {
+                        get: () => undefined
+                    });
+                    // 2. Pretend we have plugins (some sites check length)
+                    if (!navigator.plugins || navigator.plugins.length === 0) {
+                        Object.defineProperty(navigator, 'plugins', {
+                            get: () => [{
+                                0: {type: "application/x-google-chrome-pdf", suffixes: "pdf", description: "Portable Document Format"},
+                                description: "Portable Document Format",
+                                filename: "internal-pdf-viewer",
+                                length: 1,
+                                name: "Chrome PDF Plugin",
+                                item: idx => [][idx]
+                            }]
+                        });
+                    }
+                    // 3. MimeTypes
+                    if (!navigator.mimeTypes || navigator.mimeTypes.length === 0) {
+                        Object.defineProperty(navigator, 'mimeTypes', {
+                            get: () => [{
+                                description: "Portable Document Format",
+                                suffixes: "pdf",
+                                type: "application/pdf",
+                                enabledPlugin: null
+                            }]
+                        });
+                    }
+                    // 4. languages
+                    Object.defineProperty(navigator, 'languages', {
+                        get: () => ['zh-CN', 'zh', 'en']
+                    });
+                    // 5. permissions query patch (common bot check)
+                    if (navigator.permissions && navigator.permissions.query) {
+                        const originalQuery = navigator.permissions.query;
+                        navigator.permissions.query = params => {
+                            if (params && params.name === 'notifications') {
+                                return Promise.resolve({state: 'default', onchange: null});
+                            }
+                            return originalQuery.call(navigator.permissions, params);
+                        };
+                    }
+                })();
+                """
+            )
+            page._liepin_stealth_applied = True
+        except Exception:
+            pass
+
+    def _is_context_alive_locked(self) -> bool:
+        """Check whether the persistent context is still usable."""
+        if self._context is None:
+            return False
+        try:
+            pages = self._context.pages
+            if not pages:
+                return False
+            # If every page is closed, the browser was likely killed manually
+            for page in pages:
+                if not page.is_closed():
+                    return True
+            return False
+        except Exception:
+            return False
+
     def _launch_locked(self) -> LiepinBrowserState:
         """Launch the persistent browser inside the worker thread."""
         if sync_playwright is None:
@@ -259,7 +334,25 @@ class LiepinBrowserManager:
             )
 
         if self._context is not None:
-            return self._get_state_locked()
+            if self._is_context_alive_locked():
+                return self._get_state_locked()
+            # Browser was closed externally; clean up stale references
+            try:
+                self._context.close()
+            except Exception:
+                pass
+            self._context = None
+            self._page = None
+
+        # Ensure any previous playwright instance is fully stopped before
+        # starting a new one, otherwise sync_playwright().start() can fail
+        # with "using Playwright Sync API inside the asyncio loop".
+        if self._playwright is not None:
+            try:
+                self._playwright.stop()
+            except Exception:
+                pass
+            self._playwright = None
 
         profile_dir = self.get_profile_dir()
         os.makedirs(profile_dir, exist_ok=True)
@@ -330,6 +423,18 @@ class LiepinBrowserManager:
         except Exception:
             pass
 
+        # Hide basic automation flags (P0 anti-detection)
+        try:
+            self._context.add_init_script(
+                """
+                Object.defineProperty(navigator, 'webdriver', {
+                    get: () => undefined
+                });
+                """
+            )
+        except Exception:
+            pass
+
         actual_browser = (
             executable_path or launch_kwargs.get("channel") or "playwright-chromium"
         )
@@ -345,6 +450,7 @@ class LiepinBrowserManager:
         self._page = self._pick_best_page(list(self._context.pages))
         if self._page is None:
             self._page = self._context.new_page()
+        self._apply_stealth_locked(self._page)
         return self._get_state_locked()
 
     def _ensure_page_locked(self) -> Page:
@@ -355,6 +461,7 @@ class LiepinBrowserManager:
         if page is None and self._context is not None:
             self._page = self._context.new_page()
             page = self._page
+        self._apply_stealth_locked(page)
         return page
 
     @staticmethod
@@ -398,6 +505,7 @@ class LiepinBrowserManager:
                 self._launch_locked()
             page = self._context.new_page()
             self._page = page
+            self._apply_stealth_locked(page)
             return page
         return self._run_on_worker(_new_page_locked)
 
@@ -684,6 +792,30 @@ class LiepinBrowserManager:
         if state.logged_in:
             return state
         raise LiepinLoginRequiredError("猎聘当前未登录，请先在浏览器中手动完成登录")
+
+    def close_browser(self) -> None:
+        """Close only the browser context without killing the worker thread."""
+        def _close_browser_locked() -> None:
+            if self._context is not None:
+                try:
+                    self._context.close()
+                except Exception:
+                    pass
+                self._context = None
+            if self._playwright is not None:
+                try:
+                    self._playwright.stop()
+                except Exception:
+                    pass
+                self._playwright = None
+            self._page = None
+
+        if self._thread and self._thread.is_alive():
+            self._run_on_worker(_close_browser_locked)
+        else:
+            self._context = None
+            self._playwright = None
+            self._page = None
 
     def close(self) -> None:
         """Close the persistent browser context and Playwright runtime."""
