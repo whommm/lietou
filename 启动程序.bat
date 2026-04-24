@@ -1,4 +1,4 @@
-@echo off
+﻿@echo off
 chcp 65001 >nul
 cd /d "%~dp0"
 
@@ -19,7 +19,7 @@ echo [检查] 检查依赖包...
 venv\Scripts\python.exe -c "import customtkinter, openpyxl" 2>nul
 if errorlevel 1 (
     echo [安装] 正在安装依赖包...
-    venv\Scripts\pip.exe install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+    venv\Scripts\python.exe -m pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
     if errorlevel 1 (
         echo [错误] 依赖安装失败
         pause

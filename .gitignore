@@ -63,3 +63,25 @@ NEWS.txt
 
 # opencode 配置
 .opencode/
+
+# 浏览器数据
+browser_profile/
+
+# 扩展相关
+copilot-0.0.16-chrome/
+copilot-0.0.16-chrome.zip
+copilot-reconstructed/
+
+# 调试产物
+debug_artifacts/
+
+# 数据库
+liepin_workbench.db
+
+# 缓存
+.pytest_cache/
+.ruff_cache/
+_nul
+
+# 导出文件
+exports/
