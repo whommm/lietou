@@ -255,6 +255,50 @@ MATCH_CRITERIA_PROMPT_APPENDIX = """
 严禁在匹配标准 JSON 前后添加任何说明文字或 Markdown 标记。匹配标准 JSON 必须紧跟在 HTML 内容之后，且为响应文本的最后部分。
 """
 
+MATCH_CRITERIA_GENERATION_PROMPT = """
+你是一位资深猎头顾问。请根据以下岗位描述和岗位分析，输出一份结构化的候选人匹配标准。
+
+只允许输出一个可被程序直接解析的 JSON 对象，不要输出 Markdown，不要输出说明文字。
+
+JSON 格式：
+{
+  "dealbreakers": [
+    {"id":"db_1","text":"...","enabled":true,"weight":0}
+  ],
+  "core_requirements": [
+    {"id":"cr_1","text":"...","enabled":true,"weight":40},
+    {"id":"cr_2","text":"...","enabled":true,"weight":30},
+    {"id":"cr_3","text":"...","enabled":true,"weight":30}
+  ],
+  "basic_requirements": [
+    {"id":"br_1","text":"...","enabled":true,"weight":0}
+  ],
+  "bonuses": [
+    {"id":"bo_1","text":"...","enabled":true,"weight":0}
+  ],
+  "misjudgment_reminders": [
+    "..."
+  ],
+  "version": 1,
+  "confirmed_at": ""
+}
+
+规则：
+1. dealbreakers 不超过 3 项，必须是绝对硬门槛。
+2. core_requirements 3-6 项，启用项 weight 之和必须等于 100。
+3. basic_requirements 2-4 项。
+4. bonuses 2-4 项。
+5. misjudgment_reminders 2-3 条。
+6. 所有 text 必须具体可判断，避免“综合素质好”这类空话。
+7. JD 或分析中没有的信息不要编造。
+
+岗位描述：
+{job_description}
+
+岗位分析：
+{analysis_html}
+"""
+
 RESUME_MATCH_PROMPT = (
     """你是一位资深猎头顾问，现在需要判断候选人与目标岗位是否值得推进。你的任务不是写华丽的评分报告，而是像一个有经验的顾问一样，给出清晰的推荐结论、匹配证据、关键风险和下一步推进建议。
 

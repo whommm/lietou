@@ -17,6 +17,7 @@ from ..core.config import ConfigManager
 from ..core.database import DatabaseManager
 from ..core.history import HistoryManager
 from ..core.liepin_browser import LiepinBrowserManager
+from ..core.match_criteria_service import MatchCriteriaService
 from ..core.liepin_resume_extractor import LiepinResumeExtractor
 from ..core.liepin_search_service import LiepinSearchService
 from ..core.liepin_search_task_service import LiepinSearchTaskService
@@ -97,6 +98,7 @@ class MainWindow(ctk.CTk):
         self.configure(fg_color=self.SURFACE_COLORS["app"])
 
         self._analysis_thread: Optional[threading.Thread] = None
+        self._auto_pipeline_thread: Optional[threading.Thread] = None
         self._resume_match_thread: Optional[threading.Thread] = None
         self._company_research_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
@@ -106,6 +108,7 @@ class MainWindow(ctk.CTk):
         self._current_jd = ""
         self._candidate_job_map = {}
         self._current_candidate_excel_path = ""
+        self._last_analysis_llm_config = None
 
         self._build_ui()
         self._load_config_to_ui()
@@ -638,9 +641,10 @@ class MainWindow(ctk.CTk):
             self.job_analysis_widget.clear_result()
             messagebox.showerror("分析失败", error)
             self._set_status("岗位分析失败")
-            return
+            return None
 
         self.job_analysis_widget.set_result(self._raw_result)
+        record = None
         if self._current_jd and self._raw_result:
             record = self.job_history_manager.save_record(
                 self._current_jd, self._raw_result
@@ -654,6 +658,7 @@ class MainWindow(ctk.CTk):
             self._update_candidate_job_list()
             self._update_batch_job_list()
         self._set_status("岗位分析完成，结果已保存到历史记录")
+        return record
 
     def _start_resume_match(self):
         """进入简历匹配执行态。"""
@@ -713,6 +718,7 @@ class MainWindow(ctk.CTk):
         if not config:
             return
         url, key, model = config
+        self._last_analysis_llm_config = config
 
         self._current_jd = jd_text
         company_context = self._find_company_context(company_title)
@@ -746,7 +752,77 @@ class MainWindow(ctk.CTk):
 
     def _on_analysis_complete(self, error: Optional[str]):
         """岗位分析完成回调。"""
-        self._finish_job_analysis(error)
+        record = self._finish_job_analysis(error)
+        if record is not None and error is None:
+            self._start_auto_pipeline_after_analysis(record)
+
+    def _start_auto_pipeline_after_analysis(self, record):
+        """Continue analysis -> criteria generation -> candidate capture automatically."""
+        self.tabview.set("匹配条件")
+        self._update_match_criteria_job_list(selected_record=record)
+        self._set_status("岗位分析完成，正在单独生成匹配条件...")
+        config = self._last_analysis_llm_config or self._get_valid_llm_config_silent()
+        if not config:
+            criteria = MatchCriteriaService.build_fallback(record.jd_text)
+            self._on_auto_match_criteria_complete(record.id, criteria, None)
+            return
+        self._run_threaded_task(
+            "_auto_pipeline_thread",
+            self._do_auto_match_criteria,
+            (record.id, config),
+        )
+
+    def _do_auto_match_criteria(self, record_id: str, config):
+        """Generate match criteria in a dedicated background API call."""
+        try:
+            record = self.job_history_manager.get_by_id(record_id)
+            if record is None:
+                raise RuntimeError("未找到岗位记录")
+            url, key, model = config
+            client = self._create_llm_client(url, key, model, self.config_manager.config.timeout)
+            service = MatchCriteriaService(client)
+            criteria = service.generate(record.result, record.jd_text)
+            self._safe_after(
+                self._on_auto_match_criteria_complete, record_id, criteria, None
+            )
+        except Exception as exc:
+            self._safe_after(
+                self._on_auto_match_criteria_complete, record_id, None, str(exc)
+            )
+
+    def _on_auto_match_criteria_complete(
+        self, record_id: str, criteria: Optional[MatchCriteria], error: Optional[str]
+    ):
+        """Persist generated criteria and move into candidate capture."""
+        record = self.job_history_manager.get_by_id(record_id)
+        if record is None:
+            messagebox.showwarning("提示", "匹配条件生成后未找到岗位记录")
+            return
+        if criteria is None:
+            criteria = MatchCriteriaService.build_fallback(record.jd_text)
+            self._set_status("匹配条件 API 生成失败，已使用保底标准继续自动流程")
+        else:
+            self._set_status("匹配条件已生成，准备进入候选人抓取")
+        if error:
+            # Keep the chain moving, but leave a visible breadcrumb in the status bar.
+            self._set_status("匹配条件 API 生成失败，已使用保底标准继续自动流程：{}".format(error))
+
+        record.match_criteria_json = json.dumps(criteria.to_dict(), ensure_ascii=False)
+        record.match_criteria_confirmed = True
+        self.job_history_manager.repository.upsert(record)
+        self.job_analysis_widget.set_match_criteria(criteria)
+        self._update_match_criteria_job_list(selected_record=record)
+        self._update_candidate_job_list(selected_record=record)
+        self._update_batch_job_list(selected_record=record)
+        self.after(500, lambda: self._continue_to_candidate_capture(record))
+
+    def _continue_to_candidate_capture(self, record):
+        """Switch to candidate capture and open the 15-second confirmation dialog."""
+        self._update_candidate_job_list(selected_record=record)
+        self.tabview.set("候选人抓取")
+        self._set_status("已进入候选人抓取，等待 15 秒确认后自动开始")
+        if hasattr(self, "candidate_library_widget"):
+            self.candidate_library_widget.run_selected_task()
 
     def _on_resume_match(self, job_desc: str, resume: str):
         """简历匹配处理。"""

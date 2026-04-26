@@ -619,6 +619,10 @@ class CandidateLibraryWidget(ctk.CTkFrame):
         self._set_info_text("正在将抓取任务提交到后台队列...")
         self.on_run_task(job_label, payload, filters, max_candidates, max_pages)
 
+    def run_selected_task(self):
+        """Start the currently selected capture task, including confirmation dialog."""
+        self._on_run_task_click()
+
     def _confirm_before_run(self, job_label: str, payload: Dict[str, object]):
         dialog = AutoGrabConfirmDialog(self, job_label, payload, self.current_filters)
         dialog.transient(self)
