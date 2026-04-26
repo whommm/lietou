@@ -31,6 +31,57 @@ class FakePage:
     pass
 
 
+class FakeStaticLocator:
+    def __init__(self, text="", visible=True, attributes=None, children=None):
+        self._text = text
+        self._visible = visible
+        self._attributes = attributes or {}
+        self._children = children or {}
+        self.clicked = 0
+        self.filled = []
+        self.waited = []
+
+    @property
+    def first(self):
+        return self
+
+    def locator(self, selector):
+        child = self._children.get(selector)
+        if child is None:
+            child = FakeStaticLocator(visible=False)
+        return child
+
+    def is_visible(self, timeout=None):
+        return self._visible
+
+    def wait_for(self, state=None, timeout=None):
+        self.waited.append((state, timeout))
+        return None
+
+    def click(self, timeout=None):
+        self.clicked += 1
+
+    def fill(self, value):
+        self.filled.append(value)
+
+    def inner_text(self, timeout=None):
+        return self._text
+
+    def get_attribute(self, name, timeout=None):
+        return self._attributes.get(name)
+
+    def count(self):
+        return 1 if self._visible else 0
+
+    def nth(self, index):
+        if index != 0:
+            raise IndexError(index)
+        return self
+
+    def bounding_box(self):
+        return self._attributes.get("bounding_box")
+
+
 class FakeEvaluatePage:
     def __init__(self, rows):
         self.rows = rows
@@ -134,6 +185,10 @@ class FakeInputLocator:
     def input_value(self, timeout=None):
         return self._value
 
+    @property
+    def first(self):
+        return self
+
 
 class FakeLocatorList:
     def __init__(self, items):
@@ -145,6 +200,10 @@ class FakeLocatorList:
     def nth(self, index):
         return self._items[index]
 
+    @property
+    def first(self):
+        return self._items[0] if self._items else FakeStaticLocator(visible=False)
+
 
 class FakeSearchInputPage:
     def __init__(self, items):
@@ -153,7 +212,7 @@ class FakeSearchInputPage:
     def locator(self, selector):
         if selector == "input.search-component-input":
             return FakeLocatorList(self._items)
-        raise RuntimeError("unexpected selector")
+        return FakeLocatorList([])
 
 
 class SearchServiceStub(LiepinSearchService):
@@ -177,6 +236,29 @@ class BrowserManagerWithRun:
 
     def export_debug_snapshot(self, reason):
         return ""
+
+
+class FakeControlPage:
+    def __init__(self, mapping, body_text=""):
+        self._mapping = mapping
+        self._body_text = body_text
+        self.keyboard = self
+        self.pressed = []
+        self.waits = []
+
+    def locator(self, selector):
+        if selector == "body":
+            return FakeStaticLocator(text=self._body_text)
+        item = self._mapping.get(selector)
+        if item is None:
+            return FakeStaticLocator(visible=False)
+        return item
+
+    def wait_for_timeout(self, timeout):
+        self.waits.append(timeout)
+
+    def press(self, key):
+        self.pressed.append(key)
 
 
 def test_extract_candidates_from_page_maps_card_lines():
@@ -227,6 +309,30 @@ def test_find_primary_search_input_prefers_editable_search_component_input():
     assert locator is page._items[1]
 
 
+def test_detect_search_controls_prefers_main_container_input_and_search_button():
+    service = LiepinSearchService(DummyBrowserManager())
+    search_input = FakeInputLocator()
+    search_input._visible = True
+    search_input.bounding_box = lambda: {"x": 180, "y": 2, "width": 680, "height": 38}
+    search_button = FakeStaticLocator(
+        text="搜 索",
+        attributes={"bounding_box": {"x": 874, "y": 1, "width": 98, "height": 42}},
+    )
+    page = FakeControlPage(
+        {
+            "button.search-btn": search_button,
+            "div.search-auto-complete-box": FakeStaticLocator(
+                children={"input.ant-select-selection-search-input": search_input}
+            ),
+        }
+    )
+
+    controls = service._detect_search_controls(page)
+
+    assert controls.search_button is search_button
+    assert controls.search_input is search_input
+
+
 def test_write_keyword_verifies_input_value():
     service = LiepinSearchService(DummyBrowserManager())
     locator = FakeInputLocator()
@@ -234,6 +340,73 @@ def test_write_keyword_verifies_input_value():
     service._write_keyword(locator, "算法工程师")
 
     assert locator.input_value() == "算法工程师"
+
+
+def test_apply_tag_filter_clicks_target_tag_and_waits():
+    service = LiepinSearchService(DummyBrowserManager())
+    target = FakeStaticLocator(text="1-3年")
+    page = FakeControlPage(
+        {"div.search-item.sfilter-work-year label.tag-item:has-text('1-3年')": target},
+        body_text="工作年限： 1-3年",
+    )
+
+    service._apply_tag_filter(page, service.FILTER_FIELD_SPECS["工作年限"], "1-3年")
+
+    assert target.clicked == 1
+
+
+def test_apply_dropdown_filter_clicks_matching_option():
+    service = LiepinSearchService(DummyBrowserManager())
+    input_locator = FakeStaticLocator()
+    option_male = FakeStaticLocator(text="男")
+    options = FakeStaticLocator(children={})
+    options.count = lambda: 2
+    options.nth = lambda index: [FakeStaticLocator(text="不限"), option_male][index]
+    dropdown = FakeStaticLocator(children={"div.ant-select-item.ant-select-item-option": options})
+    container = FakeStaticLocator(children={"input.ant-select-selection-search-input": input_locator})
+    page = FakeControlPage(
+        {
+            "div.ant-select.ant-select-lg.h-select.sexSelectStyle.gray.ant-select-single.ant-select-show-arrow": container,
+            "div.ant-select-dropdown.search-select.ant-select-dropdown-placement-bottomLeft": dropdown,
+        },
+        body_text="性 别： 男",
+    )
+
+    service._apply_dropdown_filter(page, service.FILTER_FIELD_SPECS["性别"], "男")
+
+    assert input_locator.clicked == 1
+    assert option_male.clicked == 1
+
+
+def test_apply_city_filter_uses_modal_search_and_confirm():
+    service = LiepinSearchService(DummyBrowserManager())
+    trigger = FakeStaticLocator(text="其他")
+    city_input = FakeStaticLocator()
+    suggest = FakeStaticLocator(text="湖南 · 长沙")
+    confirm = FakeStaticLocator(text="确认")
+    modal = FakeStaticLocator(
+        children={
+            'span.ant-tag.ant-tag-checkable:has-text(\'长沙\')': FakeStaticLocator(visible=False),
+            'input.ant-input[placeholder="搜索城市"]': city_input,
+            "div.suggest-list > ul > li": suggest,
+            "button.ant-btn.ant-btn-primary": confirm,
+        }
+    )
+    page = FakeControlPage(
+        {
+            "div.search-item.sfilter-city label.tag-item:has-text('长沙')": FakeStaticLocator(visible=False),
+            "div.search-item.sfilter-city span.btn-choose:has-text('其他')": trigger,
+            "div.ant-modal.city-modal": modal,
+        },
+        body_text="目前城市： 长沙",
+    )
+
+    service._apply_city_filter(page, service.FILTER_FIELD_SPECS["目前城市"], "长沙")
+
+    assert trigger.clicked == 1
+    assert city_input.filled == ["长沙"]
+    assert suggest.clicked == 1
+    assert confirm.clicked == 1
 
 
 def test_extract_current_page_candidates_uses_existing_page():

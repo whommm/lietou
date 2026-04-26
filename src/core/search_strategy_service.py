@@ -1,9 +1,10 @@
 """Structured search strategy generation for Liepin automation."""
 
 import html
+import json
 import re
 from dataclasses import dataclass, field
-from typing import List
+from typing import Dict, List
 
 
 @dataclass
@@ -16,6 +17,8 @@ class SearchStrategy:
     exclude_keywords: List[str] = field(default_factory=list)
     boolean_queries: List[str] = field(default_factory=list)
     source_company_hints: List[str] = field(default_factory=list)
+    atomic_terms: Dict[str, List[str]] = field(default_factory=dict)
+    executable_rounds: List[Dict[str, object]] = field(default_factory=list)
 
 
 class SearchStrategyService:
@@ -42,10 +45,27 @@ class SearchStrategyService:
         "exclude_keywords": ["排除 / 去噪思路", "高噪音词提醒"],
         "boolean_queries": ["推荐组合搜索公式"],
     }
+    SEARCH_INTENT_SCRIPT_PATTERN = re.compile(
+        r'<script[^>]*data-search-intent="true"[^>]*>(.*?)</script>',
+        re.DOTALL | re.IGNORECASE,
+    )
+    ROLE_SUFFIXES = (
+        "工程师",
+        "设计师",
+        "经理",
+        "主管",
+        "专员",
+        "顾问",
+        "负责人",
+        "总监",
+        "架构师",
+    )
+    STOP_TERMS = {"工程师", "经理", "主管", "专员", "顾问", "总监", "负责人"}
 
     def build_from_analysis_result(self, analysis_html: str) -> SearchStrategy:
         """Create a first-pass strategy from a job analysis HTML report."""
         analysis_html = analysis_html or ""
+        search_intent = self._extract_search_intent_json(analysis_html)
         all_keywords = self._extract_unique_copy_keywords(analysis_html)
 
         precise_keywords = self._extract_keywords_from_section(
@@ -94,6 +114,22 @@ class SearchStrategyService:
         if scene_keywords:
             synonyms = self._merge_unique_lists(synonyms, scene_keywords)
 
+        atomic_terms = self._build_atomic_terms(
+            precise_keywords=precise_keywords,
+            expansion_keywords=expansion_keywords,
+            synonyms=synonyms,
+            exclude_keywords=exclude_keywords,
+            boolean_queries=boolean_queries,
+            search_intent=search_intent,
+        )
+        executable_rounds = self._build_executable_rounds(
+            atomic_terms=atomic_terms,
+            precise_keywords=precise_keywords,
+            expansion_keywords=expansion_keywords,
+            boolean_queries=boolean_queries,
+            search_intent=search_intent,
+        )
+
         return SearchStrategy(
             precise_keywords=precise_keywords[:6],
             expansion_keywords=expansion_keywords[:6],
@@ -101,6 +137,8 @@ class SearchStrategyService:
             exclude_keywords=exclude_keywords[:6],
             boolean_queries=boolean_queries[:6],
             source_company_hints=source_company_hints[:6],
+            atomic_terms=atomic_terms,
+            executable_rounds=executable_rounds,
         )
 
     def to_payload(self, strategy: SearchStrategy) -> dict:
@@ -112,7 +150,29 @@ class SearchStrategyService:
             "exclude_keywords": list(strategy.exclude_keywords),
             "boolean_queries": list(strategy.boolean_queries),
             "source_company_hints": list(strategy.source_company_hints),
+            "atomic_terms": {
+                key: list(values) for key, values in (strategy.atomic_terms or {}).items()
+            },
+            "executable_rounds": [dict(item) for item in strategy.executable_rounds],
         }
+
+    def _extract_search_intent_json(self, analysis_html: str) -> Dict[str, List[str]]:
+        match = self.SEARCH_INTENT_SCRIPT_PATTERN.search(analysis_html or "")
+        if not match:
+            return {}
+        try:
+            data = json.loads(self._clean_text(match.group(1)))
+        except (TypeError, ValueError):
+            return {}
+        if not isinstance(data, dict):
+            return {}
+        normalized = {}
+        for key, value in data.items():
+            if isinstance(value, list):
+                normalized[key] = [
+                    item for item in (self._normalize_keyword(part) for part in value) if item
+                ]
+        return normalized
 
     def _extract_unique_copy_keywords(self, analysis_html: str) -> List[str]:
         seen = set()
@@ -219,6 +279,233 @@ class SearchStrategyService:
         cleaned = self._clean_text(value)
         cleaned = cleaned.strip(" ,，。；;：:-")
         return cleaned
+
+    def _build_atomic_terms(
+        self,
+        precise_keywords: List[str],
+        expansion_keywords: List[str],
+        synonyms: List[str],
+        exclude_keywords: List[str],
+        boolean_queries: List[str],
+        search_intent: Dict[str, List[str]],
+    ) -> Dict[str, List[str]]:
+        if search_intent:
+            atomic_terms = {
+                "domain_terms": self._take_short_terms(search_intent.get("domain_terms", [])),
+                "capability_terms": self._take_short_terms(search_intent.get("capability_terms", [])),
+                "process_terms": self._take_short_terms(search_intent.get("process_terms", [])),
+                "object_terms": self._take_short_terms(search_intent.get("object_terms", [])),
+                "exclude_terms": self._merge_unique_lists(
+                    self._take_short_terms(search_intent.get("exclude_terms", [])),
+                    self._take_short_terms(exclude_keywords),
+                ),
+            }
+            return atomic_terms
+
+        capability_terms = self._pick_capability_terms(precise_keywords + expansion_keywords)
+        domain_terms = self._pick_domain_terms(precise_keywords + expansion_keywords + synonyms)
+        process_terms = self._pick_process_terms(synonyms + self._split_query_terms(boolean_queries))
+        object_terms = self._pick_object_terms(synonyms + precise_keywords + expansion_keywords)
+        return {
+            "domain_terms": domain_terms,
+            "capability_terms": capability_terms,
+            "process_terms": process_terms,
+            "object_terms": object_terms,
+            "exclude_terms": self._take_short_terms(exclude_keywords),
+        }
+
+    def _build_executable_rounds(
+        self,
+        atomic_terms: Dict[str, List[str]],
+        precise_keywords: List[str],
+        expansion_keywords: List[str],
+        boolean_queries: List[str],
+        search_intent: Dict[str, List[str]],
+    ) -> List[Dict[str, object]]:
+        if search_intent.get("recommended_rounds"):
+            rounds = []
+            for index, query in enumerate(search_intent.get("recommended_rounds", []), start=1):
+                normalized = self._normalize_query(query)
+                if not normalized:
+                    continue
+                rounds.append(
+                    {
+                        "label": "第{}轮搜索".format(index),
+                        "query": normalized,
+                        "intent": "模型推荐轮次",
+                        "priority": index,
+                    }
+                )
+            if rounds:
+                return rounds
+
+        rounds = []
+        seen = set()
+        capabilities = atomic_terms.get("capability_terms", [])
+        domains = atomic_terms.get("domain_terms", [])
+        processes = atomic_terms.get("process_terms", [])
+
+        for domain in domains[:3]:
+            for capability in capabilities[:2]:
+                self._append_round(
+                    rounds,
+                    seen,
+                    label="主搜",
+                    query_terms=[capability, domain],
+                    intent="能力+领域",
+                )
+
+        for domain in domains[1:4]:
+            for capability in capabilities[:1]:
+                self._append_round(
+                    rounds,
+                    seen,
+                    label="扩展",
+                    query_terms=[capability, domain],
+                    intent="能力+替代领域",
+                )
+
+        for process in processes[:3]:
+            for capability in capabilities[:1]:
+                if not domains:
+                    self._append_round(
+                        rounds,
+                        seen,
+                        label="收敛",
+                        query_terms=[capability, process],
+                        intent="能力+关键工艺",
+                    )
+                else:
+                    self._append_round(
+                        rounds,
+                        seen,
+                        label="收敛",
+                        query_terms=[capability, domains[0], process],
+                        intent="能力+领域+关键工艺",
+                    )
+
+        for query in precise_keywords + expansion_keywords + self._split_query_terms(boolean_queries):
+            normalized = self._normalize_query(query)
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+            rounds.append(
+                {
+                    "label": "补充",
+                    "query": normalized,
+                    "intent": "现有策略补充",
+                    "priority": len(rounds) + 1,
+                }
+            )
+
+        return rounds[:8]
+
+    def _append_round(
+        self,
+        rounds: List[Dict[str, object]],
+        seen: set,
+        label: str,
+        query_terms: List[str],
+        intent: str,
+    ) -> None:
+        query = self._normalize_query(" ".join(term for term in query_terms if term))
+        if not query or query in seen:
+            return
+        seen.add(query)
+        rounds.append(
+            {
+                "label": "第{}轮{}".format(len(rounds) + 1, label),
+                "query": query,
+                "intent": intent,
+                "priority": len(rounds) + 1,
+            }
+        )
+
+    def _pick_capability_terms(self, keywords: List[str]) -> List[str]:
+        picked = []
+        for keyword in keywords:
+            collapsed = self._strip_role_suffix(keyword)
+            parts = self._split_compound_keyword(collapsed)
+            if parts:
+                picked.extend(parts[-1:])
+            elif collapsed:
+                picked.append(collapsed)
+        return self._take_short_terms(picked)
+
+    def _pick_domain_terms(self, keywords: List[str]) -> List[str]:
+        picked = []
+        for keyword in keywords:
+            collapsed = self._strip_role_suffix(keyword)
+            parts = self._split_compound_keyword(collapsed)
+            if len(parts) >= 2:
+                picked.extend(parts[:-1])
+            elif collapsed and collapsed not in self.STOP_TERMS:
+                picked.append(collapsed)
+        return self._take_short_terms(picked)
+
+    def _pick_process_terms(self, keywords: List[str]) -> List[str]:
+        hints = []
+        for keyword in keywords:
+            for part in self._split_compound_keyword(keyword):
+                if part.endswith(("设计", "开发", "散热", "注塑", "钣金", "压铸", "测试", "制造")):
+                    hints.append(part)
+        return self._take_short_terms(hints)
+
+    def _pick_object_terms(self, keywords: List[str]) -> List[str]:
+        hints = []
+        for keyword in keywords:
+            for part in self._split_compound_keyword(keyword):
+                if part.endswith(("系统", "平台", "产品", "模组", "外壳", "支架", "灯具", "电池")):
+                    hints.append(part)
+        return self._take_short_terms(hints)
+
+    def _split_query_terms(self, queries: List[str]) -> List[str]:
+        terms = []
+        for query in queries:
+            terms.extend(self._split_compound_keyword(query.replace("+", " ")))
+        return terms
+
+    def _split_compound_keyword(self, keyword: str) -> List[str]:
+        normalized = self._normalize_keyword(keyword)
+        if not normalized:
+            return []
+        normalized = normalized.replace("/", " ").replace(",", " ").replace("，", " ")
+        parts = [part.strip() for part in normalized.split() if part.strip()]
+        if parts:
+            return parts
+        if len(normalized) <= 4:
+            return [normalized]
+        for suffix in self.ROLE_SUFFIXES:
+            if normalized.endswith(suffix):
+                normalized = normalized[: -len(suffix)]
+                break
+        return [part for part in re.split(r"(?<=.{2})(?=.{2,4}$)", normalized) if part]
+
+    def _take_short_terms(self, terms: List[str]) -> List[str]:
+        result = []
+        seen = set()
+        for raw in terms:
+            value = self._normalize_keyword(raw)
+            if not value or value in seen:
+                continue
+            if len(value) > 8:
+                continue
+            if value in self.STOP_TERMS:
+                continue
+            seen.add(value)
+            result.append(value)
+        return result[:8]
+
+    def _strip_role_suffix(self, keyword: str) -> str:
+        normalized = self._normalize_keyword(keyword)
+        for suffix in self.ROLE_SUFFIXES:
+            if normalized.endswith(suffix) and len(normalized) > len(suffix):
+                return normalized[: -len(suffix)]
+        return normalized
+
+    def _normalize_query(self, value: str) -> str:
+        parts = self._split_compound_keyword(value)
+        return " ".join(self._merge_unique_lists([], parts))
 
     @staticmethod
     def _merge_unique_lists(base: List[str], extra: List[str]) -> List[str]:

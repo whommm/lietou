@@ -3,7 +3,7 @@
 import json
 import uuid
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from .database import DatabaseManager
 from ..models import SearchTask
@@ -41,7 +41,7 @@ class SearchTaskRepository:
         self,
         job_history_id: str,
         task_name: str,
-        keywords: Dict[str, List[str]],
+        keywords: Dict[str, Any],
         search_mode: str = "keyword",
         max_pages: int = 1,
         max_candidates: int = 20,

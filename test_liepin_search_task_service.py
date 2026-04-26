@@ -25,31 +25,46 @@ class FakeBrowserManager:
 
 
 class FakeSearchService:
-    def __init__(self, current_results, page_sequences=None, next_page_results=None):
-        self.current_results = current_results
-        self.page_sequences = list(page_sequences or [list(current_results)])
-        self.next_page_results = list(next_page_results or [])
+    def __init__(self, current_results=None, query_sequences=None, next_page_results=None):
+        self.current_results = current_results or []
+        self.query_sequences = dict(query_sequences or {})
+        self.next_page_results = dict(next_page_results or {})
         self.browser_manager = FakeBrowserManager()
         self.extract_calls = 0
+        self.search_calls = []
         self.open_calls = []
         self.closed_pages = []
         self.result_page = self.browser_manager.page
         self.page_index = 0
+        self.current_query = ""
         self.next_page_calls = 0
+
+    def search(self, keyword):
+        self.search_calls.append(keyword)
+        self.current_query = keyword
+        self.page_index = 0
+        return self._get_current_page_results()
+
+    def _get_current_page_results(self):
+        pages = self.query_sequences.get(self.current_query)
+        if pages is None:
+            pages = [list(self.current_results)]
+        index = min(self.page_index, len(pages) - 1)
+        return list(pages[index])
 
     def extract_current_page_candidates(self):
         self.extract_calls += 1
-        index = min(self.page_index, len(self.page_sequences) - 1)
-        return list(self.page_sequences[index])
+        return self._get_current_page_results()
 
     def ensure_result_page(self):
         return self.result_page
 
     def go_to_next_result_page(self):
         self.next_page_calls += 1
-        if not self.next_page_results:
+        results = self.next_page_results.get(self.current_query, [])
+        if not results:
             return False
-        should_advance = self.next_page_results.pop(0)
+        should_advance = results.pop(0)
         if should_advance:
             self.page_index += 1
         return should_advance
@@ -97,30 +112,37 @@ def build_service(tmp_path, search_service, broken_urls=None):
     return task_repository, excel_service, service
 
 
-def test_run_task_imports_current_result_page(tmp_path):
+def test_run_task_executes_search_round_and_imports_candidates(tmp_path):
     search_service = FakeSearchService(
-        [
-            LiepinSearchCandidate(
-                name="张三",
-                current_title="高级算法工程师",
-                current_company="字节跳动",
-                profile_url="https://example.com/resume/1",
-                summary="推荐系统",
-            ),
-            LiepinSearchCandidate(
-                name="李四",
-                current_title="算法专家",
-                current_company="百度",
-                profile_url="https://example.com/resume/2",
-                summary="搜索排序",
-            ),
-        ]
+        query_sequences={
+            "算法工程师": [
+                [
+                    LiepinSearchCandidate(
+                        name="张三",
+                        current_title="高级算法工程师",
+                        current_company="字节跳动",
+                        profile_url="https://example.com/resume/1",
+                        summary="推荐系统",
+                    ),
+                    LiepinSearchCandidate(
+                        name="李四",
+                        current_title="算法专家",
+                        current_company="百度",
+                        profile_url="https://example.com/resume/2",
+                        summary="搜索排序",
+                    ),
+                ]
+            ]
+        }
     )
     task_repository, excel_service, service = build_service(tmp_path, search_service)
     task = task_repository.create(
         job_history_id="job_001",
         task_name="算法岗搜索",
-        keywords={"precise_keywords": ["算法工程师"]},
+        keywords={
+            "precise_keywords": ["算法工程师"],
+            "executable_rounds": [{"query": "算法工程师", "label": "主搜", "priority": 1}],
+        },
         max_candidates=2,
     )
 
@@ -135,7 +157,7 @@ def test_run_task_imports_current_result_page(tmp_path):
     assert summary.failed_candidate_count == 0
     assert summary.pages_processed == 1
     assert summary.processed_keywords == ["算法工程师"]
-    assert search_service.extract_calls == 1
+    assert search_service.search_calls == ["算法工程师"]
     assert search_service.open_calls == [
         "https://example.com/resume/1",
         "https://example.com/resume/2",
@@ -144,6 +166,7 @@ def test_run_task_imports_current_result_page(tmp_path):
     assert updated_task is not None
     assert updated_task.status == "completed"
     assert len(records) == 2
+    assert records[0].source_keyword == "算法工程师"
     assert records[0].resume_text
     assert records[0].capture_status == "抓取成功"
     assert search_service.browser_manager.page.visited_urls == [
@@ -154,22 +177,26 @@ def test_run_task_imports_current_result_page(tmp_path):
 
 def test_run_task_keeps_going_when_one_candidate_fails(tmp_path):
     search_service = FakeSearchService(
-        [
-            LiepinSearchCandidate(
-                name="王五",
-                current_title="产品经理",
-                current_company="美团",
-                profile_url="https://example.com/resume/bad",
-                summary="增长产品",
-            ),
-            LiepinSearchCandidate(
-                name="赵六",
-                current_title="高级产品经理",
-                current_company="京东",
-                profile_url="https://example.com/resume/good",
-                summary="商业化",
-            ),
-        ]
+        query_sequences={
+            "产品经理": [
+                [
+                    LiepinSearchCandidate(
+                        name="王五",
+                        current_title="产品经理",
+                        current_company="美团",
+                        profile_url="https://example.com/resume/bad",
+                        summary="增长产品",
+                    ),
+                    LiepinSearchCandidate(
+                        name="赵六",
+                        current_title="高级产品经理",
+                        current_company="京东",
+                        profile_url="https://example.com/resume/good",
+                        summary="商业化",
+                    ),
+                ]
+            ]
+        }
     )
     task_repository, excel_service, service = build_service(
         tmp_path,
@@ -208,32 +235,36 @@ def test_run_task_keeps_going_when_one_candidate_fails(tmp_path):
 
 def test_run_task_processes_multiple_pages_until_limit(tmp_path):
     search_service = FakeSearchService(
-        current_results=[],
-        page_sequences=[
-            [
-                LiepinSearchCandidate(
-                    name="A", profile_url="https://example.com/resume/1"
-                ),
-                LiepinSearchCandidate(
-                    name="B", profile_url="https://example.com/resume/2"
-                ),
-            ],
-            [
-                LiepinSearchCandidate(
-                    name="C", profile_url="https://example.com/resume/3"
-                ),
-                LiepinSearchCandidate(
-                    name="D", profile_url="https://example.com/resume/4"
-                ),
-            ],
-        ],
-        next_page_results=[True, False],
+        query_sequences={
+            "后端工程师": [
+                [
+                    LiepinSearchCandidate(
+                        name="A", profile_url="https://example.com/resume/1"
+                    ),
+                    LiepinSearchCandidate(
+                        name="B", profile_url="https://example.com/resume/2"
+                    ),
+                ],
+                [
+                    LiepinSearchCandidate(
+                        name="C", profile_url="https://example.com/resume/3"
+                    ),
+                    LiepinSearchCandidate(
+                        name="D", profile_url="https://example.com/resume/4"
+                    ),
+                ],
+            ]
+        },
+        next_page_results={"后端工程师": [True, False]},
     )
     task_repository, excel_service, service = build_service(tmp_path, search_service)
     task = task_repository.create(
         job_history_id="job_002",
         task_name="多页搜索",
-        keywords={"precise_keywords": ["后端工程师"]},
+        keywords={
+            "precise_keywords": ["后端工程师"],
+            "executable_rounds": [{"query": "后端工程师", "label": "主搜", "priority": 1}],
+        },
         max_pages=3,
         max_candidates=3,
     )
@@ -244,7 +275,43 @@ def test_run_task_processes_multiple_pages_until_limit(tmp_path):
     assert summary.pages_processed == 2
     assert summary.sourced_candidate_count == 3
     assert summary.enriched_candidate_count == 3
-    assert search_service.extract_calls == 2
+    assert search_service.search_calls == ["后端工程师"]
+    assert search_service.extract_calls == 1
     assert search_service.next_page_calls == 1
     assert len(records) == 3
     assert {item.page_number for item in records} == {1, 2}
+
+
+def test_run_task_deduplicates_candidates_across_rounds(tmp_path):
+    duplicate = LiepinSearchCandidate(
+        name="张三",
+        current_title="高级算法工程师",
+        current_company="字节跳动",
+        profile_url="https://example.com/resume/1",
+    )
+    search_service = FakeSearchService(
+        query_sequences={
+            "算法 工程师": [[duplicate]],
+            "推荐 系统": [[duplicate, LiepinSearchCandidate(name="李四", profile_url="https://example.com/resume/2")]],
+        }
+    )
+    task_repository, excel_service, service = build_service(tmp_path, search_service)
+    task = task_repository.create(
+        job_history_id="job_003",
+        task_name="多轮去重",
+        keywords={
+            "executable_rounds": [
+                {"query": "算法 工程师", "label": "第一轮", "priority": 1},
+                {"query": "推荐 系统", "label": "第二轮", "priority": 2},
+            ]
+        },
+        max_pages=1,
+        max_candidates=10,
+    )
+
+    summary = service.run_task(task.id)
+    records = excel_service.load_candidates(summary.excel_path)
+
+    assert summary.processed_keywords == ["算法 工程师", "推荐 系统"]
+    assert len(records) == 2
+    assert [item.source_keyword for item in records] == ["算法 工程师", "推荐 系统"]

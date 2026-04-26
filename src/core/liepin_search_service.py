@@ -4,7 +4,9 @@ import logging
 import re
 from dataclasses import dataclass
 from typing import Callable
+from typing import Dict
 from typing import List
+from typing import Optional
 
 from .liepin_browser import LiepinBrowserManager
 
@@ -39,6 +41,24 @@ class LiepinSearchCandidate:
     profile_url: str = ""
     summary: str = ""
     result_index: int = -1
+
+
+@dataclass
+class LiepinSearchControls:
+    """Resolved primary controls on the Liepin search page."""
+
+    search_input: object = None
+    search_button: object = None
+
+
+@dataclass
+class LiepinFilterFieldSpec:
+    """One filter field definition resolved from the live search page."""
+
+    title: str
+    field_type: str
+    container_selector: str
+    title_text: str = ""
 
 
 class LiepinSearchService:
@@ -107,6 +127,50 @@ class LiepinSearchService:
         '[title="下一页"]',
         '[title*="下一页"]',
     ]
+    LOADING_SELECTORS = [
+        ".ant-spin.ant-spin-spinning",
+        ".resume-spin-box",
+        ".loading",
+        "[class*='loading']",
+    ]
+    FILTER_FIELD_SPECS = {
+        "目前城市": LiepinFilterFieldSpec(
+            title="目前城市",
+            field_type="city_modal",
+            container_selector="div.search-item.sfilter-city",
+            title_text="目前城市：",
+        ),
+        "期望城市": LiepinFilterFieldSpec(
+            title="期望城市",
+            field_type="city_modal",
+            container_selector="div.search-item.sfilter-city",
+            title_text="期望城市：",
+        ),
+        "工作年限": LiepinFilterFieldSpec(
+            title="工作年限",
+            field_type="tag",
+            container_selector="div.search-item.sfilter-work-year",
+            title_text="工作年限：",
+        ),
+        "教育经历": LiepinFilterFieldSpec(
+            title="教育经历",
+            field_type="tag",
+            container_selector="div.search-item.sfilter-edu",
+            title_text="教育经历：",
+        ),
+        "院校要求": LiepinFilterFieldSpec(
+            title="院校要求",
+            field_type="tag",
+            container_selector="div.search-item.sfilter-additional",
+            title_text="院校要求：",
+        ),
+        "性别": LiepinFilterFieldSpec(
+            title="性别",
+            field_type="dropdown",
+            container_selector="div.ant-select.ant-select-lg.h-select.sexSelectStyle.gray.ant-select-single.ant-select-show-arrow",
+            title_text="性 别：",
+        ),
+    }
 
     def __init__(self, browser_manager: LiepinBrowserManager):
         self.browser_manager = browser_manager
@@ -149,6 +213,24 @@ class LiepinSearchService:
 
         return self._with_debug_snapshot(
             "search_keyword_{}".format(keyword.strip()),
+            lambda: self.browser_manager.run_with_page(_run),
+        )
+
+    def apply_filters(self, filters: Dict[str, object]) -> None:
+        """Apply a batch of supported filters on the active search page."""
+        normalized_filters = {
+            (key or "").strip(): value for key, value in (filters or {}).items() if (key or "").strip()
+        }
+        if not normalized_filters:
+            return
+
+        def _run(page):
+            for title, value in normalized_filters.items():
+                self._apply_one_filter(page, title, value)
+            return True
+
+        self._with_debug_snapshot(
+            "apply_filters",
             lambda: self.browser_manager.run_with_page(_run),
         )
 
@@ -282,25 +364,13 @@ class LiepinSearchService:
         method tries visible editable candidates one by one and only accepts a
         candidate when the page actually reaches the result state.
         """
-        inputs = self._find_candidate_search_inputs(page)
-        if not inputs:
+        controls = self._detect_search_controls(page)
+        if controls.search_input is None:
             raise LiepinSearchPageChangedError("未找到猎聘搜索输入框，请检查页面结构")
-
-        last_error = None
-        for input_locator in inputs:
-            try:
-                self._clear_search_inputs(page)
-                self._write_keyword(input_locator, keyword)
-                self._submit_search(page)
-                self._wait_for_results(page)
-                return
-            except Exception as exc:
-                last_error = exc
-                continue
-
-        if last_error is not None:
-            raise last_error
-        raise LiepinSearchPageChangedError("搜索执行失败，未找到有效的关键词输入框")
+        self._clear_search_inputs(page)
+        self._write_keyword(controls.search_input, keyword)
+        self._submit_search(page, controls)
+        self._wait_for_results(page)
 
     # Regex patterns for structured field extraction from result-card text
     _AGE_PATTERN = re.compile(r"(\d+岁)")
@@ -886,13 +956,14 @@ class LiepinSearchService:
 
         self._write_keyword(input_locator, keyword)
 
-    def _submit_search(self, page: Page) -> None:
-        button_locator = self._first_visible_locator(page, self.SEARCH_BUTTON_SELECTORS)
+    def _submit_search(self, page: Page, controls: Optional[LiepinSearchControls] = None) -> None:
+        controls = controls or self._detect_search_controls(page)
+        button_locator = controls.search_button or self._first_visible_locator(page, self.SEARCH_BUTTON_SELECTORS)
         if button_locator is not None:
             button_locator.click(timeout=5000)
             return
 
-        input_locator = self._find_primary_search_input(page)
+        input_locator = controls.search_input or self._find_primary_search_input(page)
         if input_locator is None:
             raise LiepinSearchPageChangedError("未找到搜索按钮，也无法回退到输入框提交")
         input_locator.press("Enter")
@@ -1165,8 +1236,8 @@ class LiepinSearchService:
 
     def _first_visible_locator(self, page: Page, selectors: List[str]):
         for selector in selectors:
-            locator = page.locator(selector).first
             try:
+                locator = page.locator(selector).first
                 if locator.is_visible(timeout=2500):
                     return locator
             except Exception:
@@ -1175,8 +1246,66 @@ class LiepinSearchService:
 
     def _find_primary_search_input(self, page: Page):
         """Find the main free-text search input on the resume search page."""
+        return self._detect_search_controls(page).search_input
+
+    def _detect_search_controls(self, page: Page) -> LiepinSearchControls:
+        """Resolve the top search input and the matching search button."""
+        button_locator = self._find_search_button(page)
+        if button_locator is not None:
+            input_locator = self._find_search_input_near_button(page, button_locator)
+            if input_locator is not None:
+                return LiepinSearchControls(
+                    search_input=input_locator,
+                    search_button=button_locator,
+                )
+
         candidates = self._find_candidate_search_inputs(page)
-        return candidates[0] if candidates else None
+        return LiepinSearchControls(
+            search_input=candidates[0] if candidates else None,
+            search_button=button_locator,
+        )
+
+    def _find_search_button(self, page: Page):
+        primary = self._first_visible_locator(page, ["button.search-btn"])
+        if primary is not None:
+            return primary
+        return self._first_visible_locator(page, self.SEARCH_BUTTON_SELECTORS)
+
+    def _find_search_input_near_button(self, page: Page, button_locator):
+        """Prefer the verified main search container near `button.search-btn`."""
+        try:
+            container = page.locator("div.search-auto-complete-box").first
+            container.wait_for(state="visible", timeout=1500)
+            input_locator = container.locator("input.ant-select-selection-search-input").first
+            if self._is_editable_input(input_locator):
+                return input_locator
+        except Exception:
+            pass
+
+        try:
+            button_box = button_locator.bounding_box()
+        except Exception:
+            button_box = None
+        if not button_box:
+            return None
+
+        best_candidate = None
+        best_score = None
+        for candidate in self._find_candidate_search_inputs(page):
+            try:
+                box = candidate.bounding_box()
+            except Exception:
+                box = None
+            if not box:
+                continue
+            width = box.get("width") or 0
+            horizontal_gap = abs((button_box.get("x") or 0) - ((box.get("x") or 0) + width))
+            vertical_gap = abs((button_box.get("y") or 0) - (box.get("y") or 0))
+            score = (0 if width >= 500 else 1, vertical_gap, horizontal_gap)
+            if best_score is None or score < best_score:
+                best_score = score
+                best_candidate = candidate
+        return best_candidate
 
     def _find_candidate_search_inputs(self, page: Page):
         """Return candidate search inputs ordered by likelihood.
@@ -1202,8 +1331,171 @@ class LiepinSearchService:
             candidates.sort(key=lambda item: (item[0], item[1]))
             return [item[2] for item in candidates]
 
+        try:
+            direct = page.locator("input.ant-select-selection-search-input")
+            count = direct.count()
+            for index in range(count):
+                candidate = direct.nth(index)
+                if not self._is_editable_input(candidate):
+                    continue
+                top = self._locator_top(candidate)
+                candidates.append((top, index, candidate))
+        except Exception:
+            candidates = []
+
+        if candidates:
+            candidates.sort(key=lambda item: (item[0], item[1]))
+            return [item[2] for item in candidates]
+
         fallback = self._first_visible_locator(page, self.SEARCH_INPUT_SELECTORS)
         return [fallback] if fallback is not None else []
+
+    def _apply_one_filter(self, page: Page, title: str, value: object) -> None:
+        spec = self.FILTER_FIELD_SPECS.get(title)
+        if spec is None:
+            raise LiepinSearchError("暂不支持该筛选字段: {}".format(title))
+        if spec.field_type == "tag":
+            self._apply_tag_filter(page, spec, str(value))
+            return
+        if spec.field_type == "dropdown":
+            self._apply_dropdown_filter(page, spec, str(value))
+            return
+        if spec.field_type == "city_modal":
+            self._apply_city_filter(page, spec, str(value))
+            return
+        raise LiepinSearchError("未实现的筛选字段类型: {}".format(spec.field_type))
+
+    def _apply_tag_filter(self, page: Page, spec: LiepinFilterFieldSpec, value: str) -> None:
+        locator = page.locator(
+            "{} label.tag-item:has-text('{}')".format(spec.container_selector, value)
+        ).first
+        if not locator.is_visible(timeout=3000):
+            raise LiepinSearchPageChangedError("未找到标签筛选项: {} -> {}".format(spec.title, value))
+        locator.click(timeout=5000)
+        self._wait_for_filter_apply(page, expected_text=value)
+
+    def _apply_dropdown_filter(self, page: Page, spec: LiepinFilterFieldSpec, value: str) -> None:
+        container = page.locator(spec.container_selector).first
+        if not container.is_visible(timeout=3000):
+            raise LiepinSearchPageChangedError("未找到下拉筛选控件: {}".format(spec.title))
+        input_locator = container.locator("input.ant-select-selection-search-input").first
+        input_locator.click(timeout=5000)
+        options = self._open_dropdown_options(page)
+        self._select_dropdown_option(options, value)
+        self._wait_for_filter_apply(page, expected_text=value)
+
+    def _apply_city_filter(self, page: Page, spec: LiepinFilterFieldSpec, value: str) -> None:
+        hot_tag = page.locator(
+            "{} label.tag-item:has-text('{}')".format(spec.container_selector, value)
+        ).first
+        try:
+            if hot_tag.is_visible(timeout=1200):
+                hot_tag.click(timeout=5000)
+                self._wait_for_filter_apply(page, expected_text=value)
+                return
+        except Exception:
+            pass
+
+        trigger = page.locator(
+            "{} span.btn-choose:has-text('其他')".format(spec.container_selector)
+        ).first
+        if not trigger.is_visible(timeout=3000):
+            raise LiepinSearchPageChangedError("未找到城市其他入口: {}".format(spec.title))
+        trigger.click(timeout=5000)
+        modal = page.locator("div.ant-modal.city-modal").first
+        modal.wait_for(state="visible", timeout=5000)
+
+        hot_city = modal.locator("span.ant-tag.ant-tag-checkable:has-text('{}')".format(value)).first
+        try:
+            if hot_city.is_visible(timeout=1200):
+                hot_city.click(timeout=5000)
+            else:
+                raise RuntimeError("not-hot-city")
+        except Exception:
+            city_input = modal.locator('input.ant-input[placeholder="搜索城市"]').first
+            city_input.click(timeout=3000)
+            city_input.fill(value)
+            suggest = modal.locator("div.suggest-list > ul > li").first
+            suggest.wait_for(state="visible", timeout=5000)
+            suggest.click(timeout=5000)
+
+        confirm = modal.locator("button.ant-btn.ant-btn-primary").first
+        confirm.click(timeout=5000)
+        modal.wait_for(state="hidden", timeout=8000)
+        self._wait_for_filter_apply(page, expected_text=value)
+
+    def _open_dropdown_options(self, page: Page):
+        dropdown = page.locator(
+            "div.ant-select-dropdown.search-select.ant-select-dropdown-placement-bottomLeft"
+        ).first
+        try:
+            dropdown.wait_for(state="visible", timeout=1500)
+            return dropdown.locator("div.ant-select-item.ant-select-item-option")
+        except Exception:
+            page.keyboard.press("ArrowDown")
+            page.wait_for_timeout(200)
+            dropdown.wait_for(state="visible", timeout=3000)
+            return dropdown.locator("div.ant-select-item.ant-select-item-option")
+
+    def _select_dropdown_option(self, options, value: str) -> None:
+        count = options.count()
+        for index in range(count):
+            option = options.nth(index)
+            try:
+                text = (option.inner_text(timeout=1000) or "").strip()
+            except Exception:
+                continue
+            if value == text or value in text:
+                option.click(timeout=5000)
+                return
+        raise LiepinSearchPageChangedError("未找到下拉选项: {}".format(value))
+
+    def _wait_for_filter_apply(self, page: Page, expected_text: str = "", timeout: int = 12000) -> None:
+        """Wait until the filter-driven refresh cycle settles."""
+        import time
+
+        self._wait_for_loading_cycle(page, timeout=timeout)
+        self._soft_wait_for_results(page)
+        if not expected_text:
+            return
+        deadline = time.time() + timeout / 1000.0
+        while time.time() < deadline:
+            try:
+                body_text = page.locator("body").inner_text(timeout=1500)
+                if expected_text in (body_text or ""):
+                    return
+            except Exception:
+                pass
+            try:
+                page.wait_for_timeout(300)
+            except Exception:
+                break
+
+    def _wait_for_loading_cycle(self, page: Page, timeout: int = 12000) -> None:
+        import time
+
+        deadline = time.time() + timeout / 1000.0
+        saw_loading = False
+        while time.time() < deadline:
+            loading = self._is_loading(page)
+            if loading:
+                saw_loading = True
+            if saw_loading and not loading:
+                return
+            try:
+                page.wait_for_timeout(250)
+            except Exception:
+                break
+
+    def _is_loading(self, page: Page) -> bool:
+        for selector in self.LOADING_SELECTORS:
+            try:
+                locator = page.locator(selector)
+                if locator.count() > 0 and locator.first.is_visible(timeout=300):
+                    return True
+            except Exception:
+                continue
+        return False
 
     @staticmethod
     def _locator_top(locator) -> float:

@@ -2,7 +2,7 @@
 
 import logging
 from dataclasses import dataclass, field
-from typing import List
+from typing import Dict, List, Tuple
 
 from .candidate_excel_service import CandidateExcelService
 from .liepin_resume_extractor import LiepinResumeExtractionError, LiepinResumeExtractor
@@ -26,10 +26,11 @@ class SearchTaskExecutionSummary:
     partial_candidate_count: int = 0
     failed_candidate_count: int = 0
     failed_candidates: List[dict] = field(default_factory=list)
+    executed_rounds: List[dict] = field(default_factory=list)
 
 
 class LiepinSearchTaskService:
-    """Store candidates from the current result page into an Excel workbook."""
+    """Execute search rounds and store candidates into an Excel workbook."""
 
     def __init__(
         self,
@@ -44,7 +45,7 @@ class LiepinSearchTaskService:
         self.resume_extractor = resume_extractor
 
     def run_task(self, task_id: str, cancel_event=None) -> SearchTaskExecutionSummary:
-        """Import candidates from the current result page into local storage."""
+        """Execute the configured search plan and persist candidates."""
         task = self.task_repository.get_by_id(task_id)
         if task is None:
             raise ValueError("搜索任务不存在: {}".format(task_id))
@@ -58,53 +59,86 @@ class LiepinSearchTaskService:
         )
 
         try:
-            keyword = self._pick_source_keyword(task)
-            summary.processed_keywords.append(keyword)
+            rounds = self._build_search_rounds(task)
+            if not rounds:
+                rounds = [{"query": self._pick_source_keyword(task), "label": "手动搜索", "priority": 1}]
             summary.excel_path = self.candidate_excel_service.create_workbook(
                 task.task_name or "候选人"
             )
-            logger.warning("[run_task] task=%s max_pages=%s max_candidates=%s", task.id, task.max_pages, task.max_candidates)
-            for page_number in range(1, max(1, task.max_pages) + 1):
+            seen_candidates = set()
+            logger.warning("[run_task] task=%s rounds=%s max_pages=%s max_candidates=%s", task.id, len(rounds), task.max_pages, task.max_candidates)
+
+            for round_index, round_info in enumerate(rounds, start=1):
                 if cancel_event and cancel_event.is_set():
                     raise RuntimeError("用户已取消任务")
+                query = (round_info.get("query") or "").strip()
+                if not query:
+                    continue
+                summary.processed_keywords.append(query)
+                summary.executed_rounds.append(
+                    {
+                        "round_index": round_index,
+                        "query": query,
+                        "label": round_info.get("label") or "第{}轮搜索".format(round_index),
+                        "priority": round_info.get("priority") or round_index,
+                    }
+                )
                 self.task_repository.update_status(
                     task.id,
                     "running",
-                    current_step="读取第 {} 页搜索结果".format(page_number),
+                    current_step="执行第 {} 轮搜索：{}".format(round_index, query),
                 )
-                candidates = self.search_service.extract_current_page_candidates()
+                candidates = self.search_service.search(query)
+                round_pages_processed = 1
                 summary.pages_processed += 1
-                logger.warning("[run_task] page=%s extracted_candidates=%s", page_number, len(candidates))
+                logger.warning("[run_task] round=%s query=%s page=%s extracted_candidates=%s", round_index, query, 1, len(candidates))
 
-                for rank_index, candidate_summary in enumerate(candidates, start=1):
+                stop_round = self._process_candidate_batch(
+                    task=task,
+                    candidates=candidates,
+                    keyword=query,
+                    page_number=1,
+                    summary=summary,
+                    seen_candidates=seen_candidates,
+                    cancel_event=cancel_event,
+                )
+                if stop_round:
+                    break
+
+                while round_pages_processed < max(1, task.max_pages):
                     if cancel_event and cancel_event.is_set():
                         raise RuntimeError("用户已取消任务")
                     if summary.sourced_candidate_count >= task.max_candidates:
                         logger.warning("[run_task] reached max_candidates=%s, stopping", task.max_candidates)
                         break
-                    self._process_candidate(
-                        task,
-                        candidate_summary,
-                        keyword,
-                        page_number,
-                        rank_index,
-                        summary,
-                        None,
+                    if not self.search_service.go_to_next_result_page():
+                        logger.warning("[run_task] no more pages for query=%s", query)
+                        break
+                    self.search_service.ensure_result_page()
+                    round_pages_processed += 1
+                    summary.pages_processed += 1
+                    self.task_repository.update_status(
+                        task.id,
+                        "running",
+                        current_step="执行第 {} 轮搜索第 {} 页：{}".format(
+                            round_index, round_pages_processed, query
+                        ),
                     )
-
+                    candidates = self.search_service.extract_current_page_candidates()
+                    logger.warning("[run_task] round=%s query=%s page=%s extracted_candidates=%s", round_index, query, round_pages_processed, len(candidates))
+                    stop_round = self._process_candidate_batch(
+                        task=task,
+                        candidates=candidates,
+                        keyword=query,
+                        page_number=round_pages_processed,
+                        summary=summary,
+                        seen_candidates=seen_candidates,
+                        cancel_event=cancel_event,
+                    )
+                    if stop_round:
+                        break
                 if summary.sourced_candidate_count >= task.max_candidates:
                     break
-                if page_number >= max(1, task.max_pages):
-                    break
-                logger.warning("[run_task] attempting to go to next page from page=%s", page_number)
-                logger.warning("[run_task] about to go to next page from page=%s", page_number)
-                if not self.search_service.go_to_next_result_page():
-                    logger.warning("[run_task] go_to_next_result_page returned False, stopping pagination")
-                    break
-                logger.warning("[run_task] next page navigation succeeded, ensuring result page")
-                # Refresh page reference after navigation and validate still on search page
-                self.search_service.ensure_result_page()
-                logger.warning("[run_task] result page ensured after navigation")
 
             self.task_repository.update_status(
                 task.id,
@@ -136,6 +170,33 @@ class LiepinSearchTaskService:
         flattened = self._flatten_keywords(task)
         return flattened[0] if flattened else "手动搜索"
 
+    def _build_search_rounds(self, task: SearchTask) -> List[dict]:
+        rounds = []
+        for item in task.keywords.get("executable_rounds", []):
+            if not isinstance(item, dict):
+                continue
+            query = (item.get("query") or "").strip()
+            if not query:
+                continue
+            rounds.append(
+                {
+                    "label": item.get("label") or "搜索轮次",
+                    "query": query,
+                    "intent": item.get("intent") or "",
+                    "priority": item.get("priority") or len(rounds) + 1,
+                }
+            )
+        if rounds:
+            return rounds
+        return [
+            {
+                "label": "默认搜索",
+                "query": keyword,
+                "priority": index + 1,
+            }
+            for index, keyword in enumerate(self._flatten_keywords(task))
+        ]
+
     def _flatten_keywords(self, task: SearchTask) -> List[str]:
         ordered_keys = [
             "precise_keywords",
@@ -153,6 +214,50 @@ class LiepinSearchTaskService:
                 seen.add(normalized)
                 flattened.append(normalized)
         return flattened
+
+    def _process_candidate_batch(
+        self,
+        task: SearchTask,
+        candidates: List[LiepinSearchCandidate],
+        keyword: str,
+        page_number: int,
+        summary: SearchTaskExecutionSummary,
+        seen_candidates: set,
+        cancel_event=None,
+    ) -> bool:
+        for rank_index, candidate_summary in enumerate(candidates, start=1):
+            if cancel_event and cancel_event.is_set():
+                raise RuntimeError("用户已取消任务")
+            if summary.sourced_candidate_count >= task.max_candidates:
+                return True
+            candidate_key = self._build_candidate_dedupe_key(candidate_summary)
+            if candidate_key and candidate_key in seen_candidates:
+                continue
+            if candidate_key:
+                seen_candidates.add(candidate_key)
+            self._process_candidate(
+                task,
+                candidate_summary,
+                keyword,
+                page_number,
+                rank_index,
+                summary,
+                None,
+            )
+        return summary.sourced_candidate_count >= task.max_candidates
+
+    @staticmethod
+    def _build_candidate_dedupe_key(candidate_summary: LiepinSearchCandidate) -> str:
+        parts = [
+            (candidate_summary.profile_url or "").strip().lower(),
+            (candidate_summary.name or "").strip(),
+            (candidate_summary.current_company or "").strip(),
+            (candidate_summary.current_title or "").strip(),
+        ]
+        if parts[0]:
+            return parts[0]
+        fallback = "|".join(part for part in parts[1:] if part)
+        return fallback.lower()
 
     def _process_candidate(
         self,
@@ -280,6 +385,7 @@ class LiepinSearchTaskService:
                 "序号": summary.sourced_candidate_count + 1,
                 "姓名": candidate_summary.name or "",
                 "年龄": candidate_summary.age or "",
+                "来源关键词": keyword,
                 "页码": page_number,
                 "排名": rank_index,
                 "简历链接": candidate_summary.profile_url or "",

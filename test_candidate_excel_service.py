@@ -16,6 +16,7 @@ def test_candidate_excel_service_creates_and_reads_workbook(tmp_path):
             "序号": 1,
             "姓名": "张三",
             "年龄": "30岁",
+            "来源关键词": "算法工程师",
             "页码": 1,
             "排名": 2,
             "简历链接": "https://example.com/resume/1",
@@ -36,6 +37,7 @@ def test_candidate_excel_service_creates_and_reads_workbook(tmp_path):
     assert records[0].row_index == row_index
     assert records[0].name == "张三"
     assert records[0].age == "30岁"
+    assert records[0].source_keyword == "算法工程师"
     assert records[0].capture_status == service.CAPTURE_STATUS_SUCCESS
     assert records[0].resume_text == "这是简历正文"
 
@@ -49,6 +51,7 @@ def test_candidate_excel_service_filters_matchable_rows_and_writes_results(tmp_p
         {
             "序号": 1,
             "姓名": "李四",
+            "来源关键词": "产品经理",
             "简历链接": "https://example.com/resume/ok",
             "简历抓取状态": service.CAPTURE_STATUS_SUCCESS,
             "简历详情": "完整简历",

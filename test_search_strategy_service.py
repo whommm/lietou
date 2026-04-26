@@ -24,6 +24,8 @@ def test_to_payload_returns_serializable_structure():
 
     assert payload["precise_keywords"] == ["后端开发"]
     assert payload["boolean_queries"] == []
+    assert isinstance(payload["atomic_terms"], dict)
+    assert isinstance(payload["executable_rounds"], list)
 
 
 def test_build_from_analysis_result_extracts_structured_sections():
@@ -72,3 +74,34 @@ def test_build_from_analysis_result_extracts_structured_sections():
         "排除纯学术背景" in item or "纯学术背景" in item
         for item in strategy.exclude_keywords
     )
+    assert strategy.atomic_terms["capability_terms"]
+    assert strategy.executable_rounds
+
+
+def test_build_from_analysis_result_prefers_embedded_search_intent_json():
+    service = SearchStrategyService()
+    html = """
+    <div class="tag-cloud">
+      <a href="copy://灯具结构工程师" class="tag">灯具结构工程师</a>
+    </div>
+    <script type="application/json" data-search-intent="true">
+    {
+      "domain_terms": ["灯具", "照明", "LED"],
+      "capability_terms": ["结构", "结构设计"],
+      "process_terms": ["散热", "注塑"],
+      "object_terms": ["外壳"],
+      "exclude_terms": ["建筑结构"],
+      "recommended_rounds": ["结构 灯具", "结构 照明", "结构 灯具 散热"]
+    }
+    </script>
+    """
+
+    strategy = service.build_from_analysis_result(html)
+
+    assert strategy.atomic_terms["domain_terms"] == ["灯具", "照明", "LED"]
+    assert strategy.atomic_terms["capability_terms"] == ["结构", "结构设计"]
+    assert [item["query"] for item in strategy.executable_rounds] == [
+        "结构 灯具",
+        "结构 照明",
+        "结构 灯具 散热",
+    ]

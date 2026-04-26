@@ -1,7 +1,7 @@
 """Search task models for Liepin automation."""
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
@@ -11,7 +11,7 @@ class SearchTask:
     id: str
     job_history_id: str
     task_name: str
-    keywords: Dict[str, List[str]] = field(default_factory=dict)
+    keywords: Dict[str, Any] = field(default_factory=dict)
     search_mode: str = "keyword"
     max_pages: int = 1
     max_candidates: int = 20

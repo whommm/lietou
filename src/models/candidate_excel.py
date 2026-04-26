@@ -12,6 +12,7 @@ class CandidateExcelRecord:
     sequence: int
     name: str = ""
     age: str = ""
+    source_keyword: str = ""
     page_number: Optional[int] = None
     rank_index: Optional[int] = None
     profile_url: str = ""
