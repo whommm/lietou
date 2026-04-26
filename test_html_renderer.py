@@ -20,7 +20,7 @@ def test_imports():
         print(f"  [OK] tkinterweb 版本: {version}")
     except ImportError as e:
         print(f"  [FAIL] tkinterweb 导入失败: {e}")
-        return False
+        assert False, f"tkinterweb 导入失败: {e}"
 
     try:
         import markdown
@@ -28,7 +28,7 @@ def test_imports():
         print(f"  [OK] markdown 版本: {version}")
     except ImportError as e:
         print(f"  [FAIL] markdown 导入失败: {e}")
-        return False
+        assert False, f"markdown 导入失败: {e}"
 
     try:
         import importlib.util
@@ -36,19 +36,19 @@ def test_imports():
         spec = importlib.util.find_spec("src.ui.html_renderer")
         if spec is None:
             print("  [FAIL] HtmlRenderer 导入失败: 模块不存在")
-            return False
+            assert False, "HtmlRenderer 导入失败: 模块不存在"
         from src.ui.html_renderer import HtmlRenderer  # noqa: F401
         print("  [OK] HtmlRenderer 导入成功")
     except ImportError as e:
         print(f"  [FAIL] HtmlRenderer 导入失败: {e}")
-        return False
+        assert False, f"HtmlRenderer 导入失败: {e}"
 
     try:
         from src.ui.themes import LIGHT_CSS, DARK_CSS
         print(f"  [OK] 主题CSS导入成功 (亮色: {len(LIGHT_CSS)}字节, 暗色: {len(DARK_CSS)}字节)")
     except ImportError as e:
         print(f"  [FAIL] 主题CSS导入失败: {e}")
-        return False
+        assert False, f"主题CSS导入失败: {e}"
 
     print("\n所有依赖导入成功!")
     assert True
@@ -102,7 +102,7 @@ def hello():
         assert True
     except Exception as e:
         print(f"  [FAIL] Markdown转换失败: {e}")
-        return False
+        assert False, f"Markdown转换失败: {e}"
 
 
 def test_gui():

@@ -1,6 +1,7 @@
 # 虚拟环境
 venv/
 .venv/
+.venv*/
 
 # Python 缓存
 __pycache__/
