@@ -28,13 +28,26 @@ def test_candidate_library_widget_updates_job_options():
         ["算法工程师 [01-01 10:00]"],
         {
             "算法工程师 [01-01 10:00]": {
-                "strategy": {"precise_keywords": ["算法工程师", "推荐系统"]}
+                "strategy": {
+                    "precise_keywords": ["算法工程师", "推荐系统"],
+                    "atomic_terms": {
+                        "capability_terms": ["算法"],
+                        "domain_terms": ["推荐系统"],
+                    },
+                    "executable_rounds": [
+                        {"label": "第1轮主搜", "query": "算法 推荐系统"}
+                    ],
+                }
             }
         },
     )
 
     assert widget.job_display.get() == "算法工程师 [01-01 10:00]"
-    assert widget.strategy_payload == {"precise_keywords": ["算法工程师", "推荐系统"]}
+    assert widget.strategy_payload["precise_keywords"] == ["算法工程师", "推荐系统"]
+    info_text = widget.info_box.get("1.0", "end")
+    assert "搜索轮次（1 条）" in info_text
+    assert "算法 推荐系统" in info_text
+    assert "原子词：能力[算法] 领域[推荐系统]" in info_text
 
     widget.destroy()
     root.destroy()
@@ -93,6 +106,32 @@ def test_candidate_library_widget_imports_excel_through_handler():
 
     assert captured["imported"] is True
     assert captured["open_dir"] is True
+
+    widget.destroy()
+    root.destroy()
+
+
+def test_candidate_library_widget_lists_source_keywords_in_candidate_records():
+    root = create_root()
+    widget = CandidateLibraryWidget(
+        root,
+        on_launch_browser=lambda: None,
+        on_check_login=lambda: None,
+        on_run_task=lambda *args: None,
+    )
+
+    widget.set_candidate_records(
+        [
+            {
+                "name": "张三",
+                "capture_status": "抓取成功",
+                "source_keyword": "算法 推荐系统",
+            }
+        ]
+    )
+
+    content = widget.candidate_list_box.get("1.0", "end")
+    assert "张三 [抓取成功] <算法 推荐系统>" in content
 
     widget.destroy()
     root.destroy()

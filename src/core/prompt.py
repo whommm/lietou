@@ -225,7 +225,21 @@ SYSTEM_PROMPT = (
 MATCH_CRITERIA_PROMPT_APPENDIX = """
 
 【匹配标准输出要求 - 必须严格遵守】
-请在上述 HTML 报告结束后，紧接着输出一个可被程序直接解析的 JSON 对象（不要包裹在 Markdown 代码块 ``` 中），格式如下：
+请先在 HTML 报告内部、`猎聘搜索策略` 模块结束后，追加一个结构化搜索意图脚本节点，格式如下（不要转义成纯文本）：
+
+<script type="application/json" data-search-intent="true">
+{"domain_terms":["..."],"capability_terms":["..."],"process_terms":["..."],"object_terms":["..."],"exclude_terms":["..."],"recommended_rounds":["能力词 领域词","能力词 领域词 工艺词"]}
+</script>
+
+要求：
+- `domain_terms` 填产品/行业/业务领域短词，例如 `灯具`、`照明`、`LED`
+- `capability_terms` 填核心能力短词，例如 `结构`、`结构设计`
+- `process_terms` 填关键工艺/方法短词，例如 `散热`、`注塑`、`钣金`
+- `object_terms` 填结构对象/模块短词，例如 `外壳`、`支架`、`模组`
+- `exclude_terms` 填需要主动排除的高噪音方向，例如 `建筑结构`
+- `recommended_rounds` 必须输出 3-6 条可直接用于猎聘搜索框执行的 query，优先使用 2-3 个短词组合，不要只给完整职位名
+
+然后在上述 HTML 报告结束后，紧接着输出一个可被程序直接解析的 JSON 对象（不要包裹在 Markdown 代码块 ``` 中），格式如下：
 
 {"dealbreakers":[{"id":"db_1","text":"...","enabled":true,"weight":0},...],"core_requirements":...,"basic_requirements":...,"bonuses":...,"misjudgment_reminders":[...],"version":1,"confirmed_at":"..."}
 
@@ -238,7 +252,7 @@ MATCH_CRITERIA_PROMPT_APPENDIX = """
 - version: 固定 1
 - confirmed_at: 当前时间 ISO 格式
 
-严禁在 JSON 前后添加任何说明文字或 Markdown 标记。JSON 必须紧跟在 HTML 内容之后，且为响应文本的最后部分。
+严禁在匹配标准 JSON 前后添加任何说明文字或 Markdown 标记。匹配标准 JSON 必须紧跟在 HTML 内容之后，且为响应文本的最后部分。
 """
 
 RESUME_MATCH_PROMPT = (

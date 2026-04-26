@@ -392,7 +392,7 @@ class CandidateLibraryWidget(ctk.CTkFrame):
             return
         self.strategy_payload = payload.get("strategy", {})
         self.task_id = ""
-        self._set_info_text("已选择岗位：{}\n等待开始抓取。".format(value))
+        self._set_info_text(self._build_strategy_preview_text(value, payload))
 
     def _on_run_task_click(self):
         job_label = self.job_display.get().strip()
@@ -482,6 +482,36 @@ class CandidateLibraryWidget(ctk.CTkFrame):
         self.info_box.insert("1.0", text)
         self.info_label.configure(text=text.splitlines()[0] if text else "")
 
+    def _build_strategy_preview_text(self, job_label: str, payload: Dict[str, object]) -> str:
+        strategy = payload.get("strategy", {}) if payload else {}
+        rounds = strategy.get("executable_rounds", []) if isinstance(strategy, dict) else []
+        atomic_terms = strategy.get("atomic_terms", {}) if isinstance(strategy, dict) else {}
+
+        lines = ["已选择岗位：{}".format(job_label)]
+        if rounds:
+            lines.append("搜索轮次（{} 条）：".format(len(rounds)))
+            for item in rounds[:4]:
+                label = item.get("label") or "搜索"
+                query = item.get("query") or ""
+                if query:
+                    lines.append("- {}: {}".format(label, query))
+        else:
+            precise = strategy.get("precise_keywords", []) if isinstance(strategy, dict) else []
+            if precise:
+                lines.append("首选关键词：{}".format(" / ".join(precise[:3])))
+
+        capability_terms = atomic_terms.get("capability_terms", []) if isinstance(atomic_terms, dict) else []
+        domain_terms = atomic_terms.get("domain_terms", []) if isinstance(atomic_terms, dict) else []
+        if capability_terms or domain_terms:
+            lines.append(
+                "原子词：能力[{}] 领域[{}]".format(
+                    " / ".join(capability_terms[:3]) or "无",
+                    " / ".join(domain_terms[:3]) or "无",
+                )
+            )
+        lines.append("等待开始抓取。")
+        return "\n".join(lines)
+
     def set_candidate_records(self, records: List[Dict]):
         self._candidate_records = records or []
         self._refresh_candidate_list()
@@ -496,10 +526,12 @@ class CandidateLibraryWidget(ctk.CTkFrame):
         ]
         for rec in self._candidate_records:
             status = rec.get("capture_status", "未知")
+            source_keyword = rec.get("source_keyword", "")
             lines.append(
-                "- {} [{}]".format(
+                "- {} [{}]{}".format(
                     rec.get("name") or "未命名",
                     status,
+                    " <{}>".format(source_keyword) if source_keyword else "",
                 )
             )
         self.candidate_list_box.delete("1.0", "end")

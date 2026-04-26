@@ -522,12 +522,14 @@ class MainWindow(ctk.CTk):
         strategy = self.search_strategy_service.build_from_analysis_result(
             record.result
         )
+        strategy_payload = self.search_strategy_service.to_payload(strategy)
         return {
             "record_id": record.id,
             "title": record.title,
             "job_description": record.jd_text,
             "analysis_result": record.result,
-            "strategy": self.search_strategy_service.to_payload(strategy),
+            "strategy": strategy_payload,
+            "strategy_round_count": len(strategy_payload.get("executable_rounds", [])),
             "match_criteria": record.match_criteria_json or "",
         }
 
@@ -1254,6 +1256,7 @@ class MainWindow(ctk.CTk):
                     "candidate_id": str(record.row_index),
                     "name": record.name,
                     "profile_url": record.profile_url,
+                    "source_keyword": record.source_keyword,
                     "resume_text": record.resume_text,
                     "resume_summary": record.resume_text[:120],
                     "capture_status": record.capture_status,
