@@ -4,6 +4,166 @@ import customtkinter as ctk
 from tkinter import messagebox
 from typing import Callable, Dict, List, Optional
 
+from ..utils.city_data import build_default_city_scope
+
+
+class CityEditDialog(ctk.CTkToplevel):
+    """Small modal dialog for editing the 4-city search scope."""
+
+    def __init__(self, master, cities: List[str]):
+        super().__init__(master)
+        self.title("修改搜索城市")
+        self.geometry("360x280")
+        self.resizable(False, False)
+        self.result: Optional[List[str]] = None
+        self._default_cities = list(cities or [])
+        self.entries = []
+
+        labels = ["岗位城市（必填）", "周边城市1", "周边城市2", "周边城市3"]
+        for index, label in enumerate(labels):
+            ctk.CTkLabel(self, text=label).grid(row=index, column=0, padx=18, pady=(16 if index == 0 else 8, 4), sticky="w")
+            entry = ctk.CTkEntry(self, height=34)
+            entry.grid(row=index, column=1, padx=18, pady=(16 if index == 0 else 8, 4), sticky="ew")
+            if index < len(self._default_cities):
+                entry.insert(0, self._default_cities[index])
+            self.entries.append(entry)
+        self.grid_columnconfigure(1, weight=1)
+
+        row = ctk.CTkFrame(self, fg_color="transparent")
+        row.grid(row=4, column=0, columnspan=2, padx=18, pady=18, sticky="ew")
+        row.grid_columnconfigure((0, 1), weight=1)
+        ctk.CTkButton(row, text="确认", command=self._confirm).grid(row=0, column=0, padx=(0, 6), sticky="ew")
+        ctk.CTkButton(row, text="恢复默认", command=self._restore).grid(row=0, column=1, padx=(6, 0), sticky="ew")
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
+
+    def _confirm(self):
+        cities = []
+        for entry in self.entries:
+            city = entry.get().strip()
+            if city and city not in cities:
+                cities.append(city)
+        if not cities:
+            messagebox.showwarning("提示", "岗位城市不能为空")
+            return
+        self.result = cities[:4]
+        self.destroy()
+
+    def _restore(self):
+        primary = self.entries[0].get().strip() or (self._default_cities[0] if self._default_cities else "")
+        restored = build_default_city_scope(primary) if primary else self._default_cities
+        for index, entry in enumerate(self.entries):
+            entry.delete(0, "end")
+            if index < len(restored):
+                entry.insert(0, restored[index])
+
+
+class AutoGrabConfirmDialog(ctk.CTkToplevel):
+    """Modal 15-second confirmation dialog before automatic capture starts."""
+
+    def __init__(self, master, job_label: str, payload: dict, filters: Dict[str, object]):
+        super().__init__(master)
+        self.title("自动抓取确认")
+        self.geometry("620x520")
+        self.resizable(False, False)
+        self.result: Optional[Dict[str, object]] = None
+        self._seconds = 15
+        self._closed = False
+        self.job_label = job_label
+        self.payload = payload or {}
+        self.filters = dict(filters or {})
+        self._build_ui()
+        self.protocol("WM_DELETE_WINDOW", self._cancel)
+        self.after(1000, self._tick)
+
+    def _build_ui(self):
+        self.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(self, text="即将按以下条件自动抓取", font=ctk.CTkFont(size=20, weight="bold")).grid(row=0, column=0, padx=22, pady=(22, 8), sticky="w")
+        ctk.CTkLabel(self, text=self.job_label, wraplength=560, justify="left").grid(row=1, column=0, padx=22, pady=(0, 12), sticky="w")
+
+        self.filter_box = ctk.CTkTextbox(self, height=105, wrap="word")
+        self.filter_box.grid(row=2, column=0, padx=22, pady=(0, 10), sticky="ew")
+        self._refresh_filter_box()
+
+        ctk.CTkButton(self, text="修改城市", command=self._edit_cities).grid(row=3, column=0, padx=22, pady=(0, 12), sticky="w")
+
+        self.round_box = ctk.CTkTextbox(self, height=150, wrap="word")
+        self.round_box.grid(row=4, column=0, padx=22, pady=(0, 14), sticky="ew")
+        self.round_box.insert("1.0", self._build_round_text())
+        self.round_box.configure(state="disabled")
+
+        row = ctk.CTkFrame(self, fg_color="transparent")
+        row.grid(row=5, column=0, padx=22, pady=(0, 8), sticky="ew")
+        row.grid_columnconfigure((0, 1), weight=1)
+        ctk.CTkButton(row, text="立即开始", command=self._confirm).grid(row=0, column=0, padx=(0, 8), sticky="ew")
+        ctk.CTkButton(row, text="取消", command=self._cancel).grid(row=0, column=1, padx=(8, 0), sticky="ew")
+
+        self.countdown_label = ctk.CTkLabel(self, text="15 秒后自动开始...")
+        self.countdown_label.grid(row=6, column=0, padx=22, pady=(0, 18))
+
+    def _build_round_text(self) -> str:
+        strategy = self.payload.get("strategy", {}) if self.payload else {}
+        rounds = strategy.get("executable_rounds", []) if isinstance(strategy, dict) else []
+        lines = ["搜索计划（共 {} 轮，每轮最多 30 人）：".format(len(rounds))]
+        for index, item in enumerate(rounds[:8], start=1):
+            lines.append("第{}轮：{}".format(index, item.get("query") or item.get("label") or "未命名搜索"))
+        if not rounds:
+            lines.append("暂无可执行轮次，将使用默认关键词。")
+        lines.append("")
+        lines.append("执行策略：每轮抓取后自动批量匹配。")
+        return "\n".join(lines)
+
+    def _refresh_filter_box(self):
+        self.filter_box.configure(state="normal")
+        self.filter_box.delete("1.0", "end")
+        self.filter_box.insert("1.0", self._build_filter_text(self.filters))
+        self.filter_box.configure(state="disabled")
+
+    @staticmethod
+    def _build_filter_text(filters: Dict[str, object]) -> str:
+        cities = filters.get("目前城市") or []
+        if isinstance(cities, str):
+            cities = [cities]
+        return "\n".join(
+            [
+                "城市：{}".format("、".join(cities) if cities else "全国"),
+                "工作年限：{}".format(filters.get("工作年限") or "不限"),
+                "教育经历：{}".format(filters.get("教育经历") or "不限"),
+                "性别：{}".format(filters.get("性别") or "不限"),
+            ]
+        )
+
+    def _edit_cities(self):
+        cities = self.filters.get("目前城市") or []
+        if isinstance(cities, str):
+            cities = [cities]
+        dialog = CityEditDialog(self, list(cities))
+        dialog.transient(self)
+        dialog.grab_set()
+        self.wait_window(dialog)
+        if dialog.result:
+            self.filters["目前城市"] = dialog.result
+            self._refresh_filter_box()
+
+    def _tick(self):
+        if self._closed:
+            return
+        self._seconds -= 1
+        if self._seconds <= 0:
+            self._confirm()
+            return
+        self.countdown_label.configure(text="{} 秒后自动开始...".format(self._seconds))
+        self.after(1000, self._tick)
+
+    def _confirm(self):
+        self._closed = True
+        self.result = dict(self.filters)
+        self.destroy()
+
+    def _cancel(self):
+        self._closed = True
+        self.result = None
+        self.destroy()
+
 
 class CandidateLibraryWidget(ctk.CTkFrame):
     """Candidate capture workspace focused on task control."""
@@ -50,6 +210,7 @@ class CandidateLibraryWidget(ctk.CTkFrame):
         self.job_options: List[str] = ["请先分析岗位"]
         self.job_data_map: Dict[str, Dict[str, object]] = {}
         self.strategy_payload: Dict[str, List[str]] = {}
+        self.current_filters: Dict[str, object] = {}
         self.task_id: str = ""
         self._excel_file_path: str = ""
         self._candidate_records: List[Dict] = []
@@ -226,7 +387,7 @@ class CandidateLibraryWidget(ctk.CTkFrame):
             text_color=colors["text"],
         )
         self.max_candidates_entry.pack(fill="x", padx=12, pady=(0, 10))
-        self.max_candidates_entry.insert(0, "20")
+        self.max_candidates_entry.insert(0, "90")
 
         limit_card_right = ctk.CTkFrame(
             limit_frame,
@@ -252,6 +413,42 @@ class CandidateLibraryWidget(ctk.CTkFrame):
         self.max_pages_entry.pack(fill="x", padx=12, pady=(0, 10))
         self.max_pages_entry.insert(0, "1")
 
+        plan_header = ctk.CTkFrame(frame, fg_color="transparent")
+        plan_header.grid(row=5, column=0, padx=16, pady=(8, 6), sticky="ew")
+        plan_header.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(
+            plan_header,
+            text="抓取计划",
+            font=ctk.CTkFont(size=15, weight="bold"),
+            text_color=colors["text"],
+        ).grid(row=0, column=0, sticky="w")
+        self.edit_city_btn = ctk.CTkButton(
+            plan_header,
+            text="修改城市",
+            width=86,
+            height=30,
+            corner_radius=14,
+            fg_color=colors["secondary"],
+            hover_color=colors["secondary_hover"],
+            text_color=colors["text"],
+            command=self._on_edit_cities_click,
+        )
+        self.edit_city_btn.grid(row=0, column=1, sticky="e")
+
+        self.plan_box = ctk.CTkTextbox(
+            frame,
+            height=170,
+            wrap="word",
+            corner_radius=18,
+            border_width=1,
+            border_color=colors["border"],
+            fg_color=colors["panel_alt"],
+            text_color=colors["text"],
+            scrollbar_button_color=colors["accent"],
+            scrollbar_button_hover_color=colors["accent_hover"],
+        )
+        self.plan_box.grid(row=6, column=0, padx=16, pady=(0, 16), sticky="ew")
+        self.plan_box.insert("1.0", "选择岗位后显示抓取计划。")
 
 
     def _build_status_panel(self):
@@ -388,11 +585,16 @@ class CandidateLibraryWidget(ctk.CTkFrame):
         payload = self.job_data_map.get(value)
         if not payload:
             self.strategy_payload = {}
+            self.current_filters = {}
             self._set_info_text("请先从岗位分析同步搜索策略。")
+            self._set_plan_text("选择岗位后显示抓取计划。")
             return
         self.strategy_payload = payload.get("strategy", {})
+        self.current_filters = dict(self.strategy_payload.get("filters", {}) or {})
         self.task_id = ""
-        self._set_info_text(self._build_strategy_preview_text(value, payload))
+        preview = self._build_strategy_preview_text(value, payload)
+        self._set_info_text(preview)
+        self._set_plan_text(preview)
 
     def _on_run_task_click(self):
         job_label = self.job_display.get().strip()
@@ -409,8 +611,37 @@ class CandidateLibraryWidget(ctk.CTkFrame):
         if max_candidates <= 0 or max_pages <= 0:
             messagebox.showwarning("提示", "抓取人数上限和页数必须大于 0")
             return
+        filters = self._confirm_before_run(job_label, payload)
+        if filters is None:
+            self._set_info_text("已取消自动抓取。")
+            return
+        self.current_filters = dict(filters)
         self._set_info_text("正在将抓取任务提交到后台队列...")
-        self.on_run_task(job_label, payload, max_candidates, max_pages)
+        self.on_run_task(job_label, payload, filters, max_candidates, max_pages)
+
+    def _confirm_before_run(self, job_label: str, payload: Dict[str, object]):
+        dialog = AutoGrabConfirmDialog(self, job_label, payload, self.current_filters)
+        dialog.transient(self)
+        dialog.grab_set()
+        self.wait_window(dialog)
+        return dialog.result
+
+    def _on_edit_cities_click(self):
+        cities = self.current_filters.get("目前城市") or []
+        if isinstance(cities, str):
+            cities = [cities]
+        dialog = CityEditDialog(self, list(cities))
+        dialog.transient(self)
+        dialog.grab_set()
+        self.wait_window(dialog)
+        if dialog.result:
+            self.current_filters["目前城市"] = dialog.result
+            self._set_plan_text(
+                self._build_strategy_preview_text(
+                    self.job_display.get().strip(),
+                    self.job_data_map.get(self.job_display.get().strip(), {}),
+                )
+            )
 
     def _on_export_debug_click(self):
         if self.on_export_debug:
@@ -482,14 +713,29 @@ class CandidateLibraryWidget(ctk.CTkFrame):
         self.info_box.insert("1.0", text)
         self.info_label.configure(text=text.splitlines()[0] if text else "")
 
+    def _set_plan_text(self, text: str):
+        self.plan_box.configure(state="normal")
+        self.plan_box.delete("1.0", "end")
+        self.plan_box.insert("1.0", text)
+        self.plan_box.configure(state="disabled")
+
     def _build_strategy_preview_text(self, job_label: str, payload: Dict[str, object]) -> str:
         strategy = payload.get("strategy", {}) if payload else {}
         rounds = strategy.get("executable_rounds", []) if isinstance(strategy, dict) else []
         atomic_terms = strategy.get("atomic_terms", {}) if isinstance(strategy, dict) else {}
+        filters = dict(self.current_filters or strategy.get("filters", {}) or {})
 
         lines = ["已选择岗位：{}".format(job_label)]
+        cities = filters.get("目前城市") or []
+        if isinstance(cities, str):
+            cities = [cities]
+        lines.append("筛选条件：")
+        lines.append("- 城市：{}".format("、".join(cities) if cities else "全国"))
+        lines.append("- 工作年限：{}".format(filters.get("工作年限") or "不限"))
+        lines.append("- 教育经历：{}".format(filters.get("教育经历") or "不限"))
+        lines.append("- 性别：{}".format(filters.get("性别") or "不限"))
         if rounds:
-            lines.append("搜索轮次（{} 条）：".format(len(rounds)))
+            lines.append("搜索轮次（{} 条）：每轮最多30人".format(len(rounds)))
             for item in rounds[:4]:
                 label = item.get("label") or "搜索"
                 query = item.get("query") or ""

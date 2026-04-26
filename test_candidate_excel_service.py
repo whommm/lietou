@@ -81,3 +81,45 @@ def test_candidate_excel_service_filters_matchable_rows_and_writes_results(tmp_p
     assert target.match_score == 86
     assert target.match_detail == "建议优先推进"
     assert target.matched_at
+
+
+def test_candidate_excel_service_loads_matchable_rows_by_round_rows(tmp_path):
+    service = CandidateExcelService(workspace_root=str(tmp_path))
+    file_path = service.create_workbook("结构工程师")
+
+    row_one = service.append_candidate_row(
+        file_path,
+        {
+            "序号": 1,
+            "姓名": "张三",
+            "来源关键词": "结构 灯具",
+            "简历抓取状态": service.CAPTURE_STATUS_SUCCESS,
+            "简历详情": "完整简历1",
+        },
+    )
+    row_two = service.append_candidate_row(
+        file_path,
+        {
+            "序号": 2,
+            "姓名": "李四",
+            "来源关键词": "结构 照明",
+            "简历抓取状态": service.CAPTURE_STATUS_SUCCESS,
+            "简历详情": "完整简历2",
+        },
+    )
+    service.append_candidate_row(
+        file_path,
+        {
+            "序号": 3,
+            "姓名": "王五",
+            "来源关键词": "结构 LED",
+            "简历抓取状态": service.CAPTURE_STATUS_FAILED,
+            "简历详情": "",
+        },
+    )
+
+    by_rows = service.load_matchable_candidates_by_rows(file_path, [row_two, 999])
+    by_keyword = service.load_matchable_candidates_by_source_keyword(file_path, "结构 灯具")
+
+    assert [item.row_index for item in by_rows] == [row_two]
+    assert [item.row_index for item in by_keyword] == [row_one]

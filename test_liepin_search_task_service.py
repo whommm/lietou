@@ -81,6 +81,16 @@ class FakeSearchService:
         return result_page
 
 
+class FakeFilterSearchService(FakeSearchService):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.search_filter_calls = []
+
+    def search(self, keyword, filters=None):
+        self.search_filter_calls.append((keyword, filters))
+        return super().search(keyword)
+
+
 class FakeResumeExtractor:
     def __init__(self, broken_urls=None):
         self.broken_urls = set(broken_urls or [])
@@ -355,3 +365,57 @@ def test_search_task_repository_persists_execution_artifacts(tmp_path):
     assert __import__("json").loads(reloaded.executed_queries_json)[0]["query"] == "算法工程师"
     assert __import__("json").loads(reloaded.query_level_stats_json)[0]["accepted_candidates"] == 2
     assert __import__("json").loads(reloaded.search_control_snapshot_json)["round_count"] == 1
+
+
+def test_run_task_applies_filters_limits_each_round_and_callbacks(tmp_path):
+    def candidate(index):
+        return LiepinSearchCandidate(
+            name="候选人{}".format(index),
+            profile_url="https://example.com/resume/{}".format(index),
+        )
+
+    search_service = FakeFilterSearchService(
+        query_sequences={
+            "结构 灯具": [[candidate(1), candidate(2), candidate(3)]],
+            "结构 照明": [[candidate(4), candidate(5), candidate(6)]],
+        }
+    )
+    task_repository, excel_service, service = build_service(tmp_path, search_service)
+    task = task_repository.create(
+        job_history_id="job_005",
+        task_name="每轮限制",
+        keywords={
+            "filters": {"目前城市": ["深圳", "广州"]},
+            "per_round_limit": 2,
+            "executable_rounds": [
+                {"query": "结构 灯具", "label": "第一轮", "priority": 1},
+                {"query": "结构 照明", "label": "第二轮", "priority": 2},
+            ],
+        },
+        max_pages=1,
+        max_candidates=10,
+    )
+    callbacks = []
+
+    summary = service.run_task(
+        task.id,
+        on_round_complete=lambda excel_path, round_index, round_info, rows, stats, task: callbacks.append(
+            (round_index, round_info["query"], list(rows), stats["accepted_candidates"])
+        ),
+    )
+    records = excel_service.load_candidates(summary.excel_path)
+
+    assert summary.sourced_candidate_count == 4
+    assert [item[0] for item in callbacks] == [1, 2]
+    assert [item[3] for item in callbacks] == [2, 2]
+    assert len(callbacks[0][2]) == 2
+    assert search_service.search_filter_calls == [
+        ("结构 灯具", {"目前城市": ["深圳", "广州"]}),
+        ("结构 照明", {"目前城市": ["深圳", "广州"]}),
+    ]
+    assert [record.source_keyword for record in records] == [
+        "结构 灯具",
+        "结构 灯具",
+        "结构 照明",
+        "结构 照明",
+    ]

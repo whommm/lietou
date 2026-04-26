@@ -200,8 +200,10 @@ class LiepinSearchService:
         self.browser_manager.ensure_logged_in()
         return self.browser_manager.get_state()
 
-    def search(self, keyword: str) -> List[LiepinSearchCandidate]:
-        """Run a keyword search and return the first page of result summaries."""
+    def search(
+        self, keyword: str, filters: Optional[Dict[str, object]] = None
+    ) -> List[LiepinSearchCandidate]:
+        """Run a keyword search, apply optional filters, and return first page summaries."""
         if not keyword.strip():
             raise LiepinSearchError("搜索关键词不能为空")
 
@@ -209,6 +211,8 @@ class LiepinSearchService:
 
         def _run(page):
             self._execute_search(page, keyword.strip())
+            if filters:
+                self._apply_filters_on_page(page, filters)
             return self.extract_candidates_from_page(page)
 
         return self._with_debug_snapshot(
@@ -218,21 +222,27 @@ class LiepinSearchService:
 
     def apply_filters(self, filters: Dict[str, object]) -> None:
         """Apply a batch of supported filters on the active search page."""
-        normalized_filters = {
-            (key or "").strip(): value for key, value in (filters or {}).items() if (key or "").strip()
-        }
-        if not normalized_filters:
+        if not filters:
             return
 
         def _run(page):
-            for title, value in normalized_filters.items():
-                self._apply_one_filter(page, title, value)
+            self._apply_filters_on_page(page, filters)
             return True
 
         self._with_debug_snapshot(
             "apply_filters",
             lambda: self.browser_manager.run_with_page(_run),
         )
+
+    def _apply_filters_on_page(self, page: Page, filters: Dict[str, object]) -> None:
+        """Apply supported filters to an already-open result page."""
+        normalized_filters = {
+            (key or "").strip(): value for key, value in (filters or {}).items() if (key or "").strip()
+        }
+        if not normalized_filters:
+            return
+        for title, value in normalized_filters.items():
+            self._apply_one_filter(page, title, value)
 
     def extract_current_page_candidates(self) -> List[LiepinSearchCandidate]:
         """Parse candidate summaries from the current page without searching."""
@@ -1361,7 +1371,7 @@ class LiepinSearchService:
             self._apply_dropdown_filter(page, spec, str(value))
             return
         if spec.field_type == "city_modal":
-            self._apply_city_filter(page, spec, str(value))
+            self._apply_city_filter(page, spec, value)
             return
         raise LiepinSearchError("未实现的筛选字段类型: {}".format(spec.field_type))
 
@@ -1384,7 +1394,31 @@ class LiepinSearchService:
         self._select_dropdown_option(options, value)
         self._wait_for_filter_apply(page, expected_text=value)
 
-    def _apply_city_filter(self, page: Page, spec: LiepinFilterFieldSpec, value: str) -> None:
+    def _apply_city_filter(self, page: Page, spec: LiepinFilterFieldSpec, value: object) -> None:
+        cities = [item for item in (value if isinstance(value, list) else [value]) if str(item).strip()]
+        cities = [str(item).strip() for item in cities]
+        if not cities:
+            return
+        if len(cities) == 1:
+            self._apply_single_city_filter(page, spec, cities[0])
+            return
+
+        trigger = page.locator(
+            "{} span.btn-choose:has-text('其他')".format(spec.container_selector)
+        ).first
+        if not trigger.is_visible(timeout=3000):
+            raise LiepinSearchPageChangedError("未找到城市其他入口: {}".format(spec.title))
+        trigger.click(timeout=5000)
+        modal = page.locator("div.ant-modal.city-modal").first
+        modal.wait_for(state="visible", timeout=5000)
+        for city in cities:
+            self._select_city_in_modal(modal, city)
+        confirm = modal.locator("button.ant-btn.ant-btn-primary").first
+        confirm.click(timeout=5000)
+        modal.wait_for(state="hidden", timeout=8000)
+        self._wait_for_filter_apply(page, expected_text=cities[0])
+
+    def _apply_single_city_filter(self, page: Page, spec: LiepinFilterFieldSpec, value: str) -> None:
         hot_tag = page.locator(
             "{} label.tag-item:has-text('{}')".format(spec.container_selector, value)
         ).first
@@ -1405,12 +1439,19 @@ class LiepinSearchService:
         modal = page.locator("div.ant-modal.city-modal").first
         modal.wait_for(state="visible", timeout=5000)
 
+        self._select_city_in_modal(modal, value)
+        confirm = modal.locator("button.ant-btn.ant-btn-primary").first
+        confirm.click(timeout=5000)
+        modal.wait_for(state="hidden", timeout=8000)
+        self._wait_for_filter_apply(page, expected_text=value)
+
+    def _select_city_in_modal(self, modal, value: str) -> None:
         hot_city = modal.locator("span.ant-tag.ant-tag-checkable:has-text('{}')".format(value)).first
         try:
             if hot_city.is_visible(timeout=1200):
                 hot_city.click(timeout=5000)
-            else:
-                raise RuntimeError("not-hot-city")
+                return
+            raise RuntimeError("not-hot-city")
         except Exception:
             city_input = modal.locator('input.ant-input[placeholder="搜索城市"]').first
             city_input.click(timeout=3000)
@@ -1418,11 +1459,6 @@ class LiepinSearchService:
             suggest = modal.locator("div.suggest-list > ul > li").first
             suggest.wait_for(state="visible", timeout=5000)
             suggest.click(timeout=5000)
-
-        confirm = modal.locator("button.ant-btn.ant-btn-primary").first
-        confirm.click(timeout=5000)
-        modal.wait_for(state="hidden", timeout=8000)
-        self._wait_for_filter_apply(page, expected_text=value)
 
     def _open_dropdown_options(self, page: Page):
         dropdown = page.locator(

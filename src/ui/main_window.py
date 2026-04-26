@@ -520,7 +520,7 @@ class MainWindow(ctk.CTk):
     def _build_candidate_job_payload(self, record) -> dict:
         """为候选人抓取页构建岗位与搜索策略数据。"""
         strategy = self.search_strategy_service.build_from_analysis_result(
-            record.result
+            "{}\n{}".format(record.result or "", record.jd_text or "")
         )
         strategy_payload = self.search_strategy_service.to_payload(strategy)
         return {
@@ -925,32 +925,74 @@ class MainWindow(ctk.CTk):
         self,
         job_label: str,
         payload: dict,
+        filters: dict,
         max_candidates: int,
         max_pages: int,
     ):
         """创建并提交当前结果页入库任务到后台队列。"""
+        strategy = dict(payload["strategy"] or {})
+        strategy["filters"] = dict(filters or {})
+        strategy["per_round_limit"] = 30
         search_task = self.search_task_repository.create(
             job_history_id=payload["record_id"],
             task_name="{} - 猎聘结果页入库".format(payload["title"]),
-            keywords=payload["strategy"],
+            keywords=strategy,
             max_pages=max_pages,
             max_candidates=max_candidates,
+        )
+        auto_match_config = self._get_valid_llm_config_silent()
+        auto_match_workers = (
+            self.batch_match_widget.get_concurrency()
+            if hasattr(self, "batch_match_widget")
+            else BatchMatchService.DEFAULT_WORKERS
         )
         task_name = "结果页入库 - {}".format(payload["title"])
         task_id = self.task_queue.submit(
             name=task_name,
             category=TaskCategory.BROWSER,
             target=self._do_candidate_task,
-            args=(search_task.id,),
+            args=(search_task.id, payload, auto_match_config, auto_match_workers),
             on_complete=self._on_candidate_task_complete,
         )
         self.candidate_library_widget.set_running(True, task_id)
         self._set_status("已创建后台任务：{}".format(task_name))
 
-    def _do_candidate_task(self, queue_task_id: str, cancel_event, task_info, search_task_id: str):
+    def _do_candidate_task(
+        self,
+        queue_task_id: str,
+        cancel_event,
+        task_info,
+        search_task_id: str,
+        payload: dict,
+        auto_match_config,
+        auto_match_workers: int,
+    ):
         """后台执行当前结果页入库任务。"""
         try:
-            summary = self.liepin_search_task_service.run_task(search_task_id, cancel_event=cancel_event)
+            task_info.auto_batch_task_ids = []
+
+            def on_round_complete(excel_path, round_index, round_info, row_indexes, round_stats, search_task):
+                batch_task_id = self._submit_round_batch_match(
+                    payload=payload,
+                    excel_path=excel_path,
+                    round_index=round_index,
+                    round_info=round_info,
+                    row_indexes=row_indexes,
+                    auto_match_config=auto_match_config,
+                    max_workers=auto_match_workers,
+                )
+                if batch_task_id:
+                    task_info.auto_batch_task_ids.append(batch_task_id)
+
+            def on_all_complete(summary_obj, _search_task):
+                task_info.all_complete_summary = summary_obj
+
+            summary = self.liepin_search_task_service.run_task(
+                search_task_id,
+                cancel_event=cancel_event,
+                on_round_complete=on_round_complete,
+                on_all_complete=on_all_complete,
+            )
             candidate_payload = self._build_candidate_excel_payloads(
                 self.candidate_excel_service.load_candidates(summary.excel_path)
             )
@@ -999,10 +1041,65 @@ class MainWindow(ctk.CTk):
             )
             task_info.summary = summary
             task_info.candidate_payload = candidate_payload
+            task_info.payload = payload
             task_info.summary_text = summary_text
         except Exception as exc:
             task_info.error_message = str(exc)
             raise
+
+    def _get_valid_llm_config_silent(self):
+        """Return LLM config without showing UI warnings."""
+        url, key, model = self._get_llm_config()
+        if not url or not key:
+            return None
+        if not validate_url(url) or not validate_api_key(key):
+            return None
+        return url, key, model
+
+    def _load_match_criteria_from_payload(self, payload: dict) -> Optional[MatchCriteria]:
+        mc_json = payload.get("match_criteria", "") if payload else ""
+        if mc_json:
+            try:
+                return MatchCriteria.from_dict(json.loads(mc_json))
+            except (ValueError, TypeError):
+                pass
+        record = self.job_history_manager.get_by_id(payload.get("record_id", ""))
+        if record and record.match_criteria_json:
+            try:
+                return MatchCriteria.from_dict(json.loads(record.match_criteria_json))
+            except (ValueError, TypeError):
+                return None
+        return None
+
+    def _submit_round_batch_match(
+        self,
+        payload: dict,
+        excel_path: str,
+        round_index: int,
+        round_info: dict,
+        row_indexes: list,
+        auto_match_config,
+        max_workers: int,
+    ) -> str:
+        """Submit one background batch match task for the rows captured in a round."""
+        if not auto_match_config:
+            return ""
+        candidates = self.candidate_excel_service.load_matchable_candidates_by_rows(
+            excel_path, row_indexes
+        )
+        if not candidates:
+            return ""
+        match_criteria = self._load_match_criteria_from_payload(payload)
+        url, key, model = auto_match_config
+        task_name = "自动批量匹配 - 第{}轮 - {}".format(
+            round_index, round_info.get("query") or round_info.get("label") or payload.get("title", "")
+        )
+        return self.task_queue.submit(
+            name=task_name,
+            category=TaskCategory.COMPUTE,
+            target=self._do_batch_match,
+            args=(url, key, model, payload, excel_path, candidates, match_criteria, max_workers),
+        )
 
     def _on_candidate_task_complete(self, task):
         """结果页入库任务完成回调。"""

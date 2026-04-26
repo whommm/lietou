@@ -3,7 +3,7 @@
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, List
+from typing import Callable, Dict, List, Optional
 
 from .candidate_excel_service import CandidateExcelService
 from .liepin_resume_extractor import LiepinResumeExtractionError, LiepinResumeExtractor
@@ -46,7 +46,13 @@ class LiepinSearchTaskService:
         self.search_service = search_service
         self.resume_extractor = resume_extractor
 
-    def run_task(self, task_id: str, cancel_event=None) -> SearchTaskExecutionSummary:
+    def run_task(
+        self,
+        task_id: str,
+        cancel_event=None,
+        on_round_complete: Optional[Callable] = None,
+        on_all_complete: Optional[Callable] = None,
+    ) -> SearchTaskExecutionSummary:
         """Execute the configured search plan and persist candidates."""
         task = self.task_repository.get_by_id(task_id)
         if task is None:
@@ -69,6 +75,8 @@ class LiepinSearchTaskService:
             )
             seen_candidates = set()
             control_snapshot = self._build_search_control_snapshot(rounds)
+            filters = task.keywords.get("filters") or {}
+            per_round_limit = int(task.keywords.get("per_round_limit") or 30)
             self.task_repository.update_execution_artifacts(
                 task.id,
                 executed_queries=[],
@@ -102,15 +110,17 @@ class LiepinSearchTaskService:
                     "accepted_candidates": 0,
                     "deduplicated_candidates": 0,
                     "failed_candidates": 0,
+                    "row_indexes": [],
                 }
                 summary.query_level_stats.append(round_stats)
+                round_row_indexes: List[int] = []
                 self._persist_execution_progress(task.id, summary, control_snapshot)
                 self.task_repository.update_status(
                     task.id,
                     "running",
                     current_step="执行第 {} 轮搜索：{}".format(round_index, query),
                 )
-                candidates = self.search_service.search(query)
+                candidates = self._search_with_filters(query, filters)
                 round_pages_processed = 1
                 summary.pages_processed += 1
                 round_stats["pages_processed"] += 1
@@ -124,17 +134,22 @@ class LiepinSearchTaskService:
                     summary=summary,
                     seen_candidates=seen_candidates,
                     round_stats=round_stats,
+                    round_row_indexes=round_row_indexes,
+                    max_round_candidates=per_round_limit,
                     cancel_event=cancel_event,
                 )
                 self._persist_execution_progress(task.id, summary, control_snapshot)
-                if stop_round:
+                if stop_round and summary.sourced_candidate_count >= task.max_candidates:
                     break
 
-                while round_pages_processed < max(1, task.max_pages):
+                while (not stop_round) and round_pages_processed < max(1, task.max_pages):
                     if cancel_event and cancel_event.is_set():
                         raise RuntimeError("用户已取消任务")
                     if summary.sourced_candidate_count >= task.max_candidates:
                         logger.warning("[run_task] reached max_candidates=%s, stopping", task.max_candidates)
+                        break
+                    if round_stats["accepted_candidates"] >= per_round_limit:
+                        logger.warning("[run_task] reached per_round_limit=%s for query=%s", per_round_limit, query)
                         break
                     if not self.search_service.go_to_next_result_page():
                         logger.warning("[run_task] no more pages for query=%s", query)
@@ -160,11 +175,23 @@ class LiepinSearchTaskService:
                         summary=summary,
                         seen_candidates=seen_candidates,
                         round_stats=round_stats,
+                        round_row_indexes=round_row_indexes,
+                        max_round_candidates=per_round_limit,
                         cancel_event=cancel_event,
                     )
                     self._persist_execution_progress(task.id, summary, control_snapshot)
                     if stop_round:
                         break
+                round_stats["row_indexes"] = list(round_row_indexes)
+                if on_round_complete:
+                    on_round_complete(
+                        summary.excel_path,
+                        round_index,
+                        dict(round_info),
+                        list(round_row_indexes),
+                        dict(round_stats),
+                        task,
+                    )
                 if summary.sourced_candidate_count >= task.max_candidates:
                     break
 
@@ -181,6 +208,8 @@ class LiepinSearchTaskService:
                 mark_finished=True,
             )
             logger.warning("[run_task] completed pages=%s sourced=%s enriched=%s partial=%s failed=%s", summary.pages_processed, summary.sourced_candidate_count, summary.enriched_candidate_count, summary.partial_candidate_count, summary.failed_candidate_count)
+            if on_all_complete:
+                on_all_complete(summary, task)
             return summary
         except Exception as exc:
             logger.exception("[run_task] task failed")
@@ -192,6 +221,20 @@ class LiepinSearchTaskService:
                 mark_finished=True,
             )
             raise
+
+    def _search_with_filters(self, query: str, filters: Dict[str, object]):
+        """Search with filters while keeping compatibility with older test doubles."""
+        if filters:
+            try:
+                return self.search_service.search(query, filters=filters)
+            except TypeError:
+                candidates = self.search_service.search(query)
+                if hasattr(self.search_service, "apply_filters"):
+                    self.search_service.apply_filters(filters)
+                    if hasattr(self.search_service, "extract_current_page_candidates"):
+                        return self.search_service.extract_current_page_candidates()
+                return candidates
+        return self.search_service.search(query)
 
     def _pick_source_keyword(self, task: SearchTask) -> str:
         """Use the first configured keyword as the import source label."""
@@ -252,6 +295,8 @@ class LiepinSearchTaskService:
         summary: SearchTaskExecutionSummary,
         seen_candidates: set,
         round_stats: dict,
+        round_row_indexes: Optional[List[int]] = None,
+        max_round_candidates: Optional[int] = None,
         cancel_event=None,
     ) -> bool:
         round_stats["raw_candidates"] += len(candidates or [])
@@ -259,6 +304,8 @@ class LiepinSearchTaskService:
             if cancel_event and cancel_event.is_set():
                 raise RuntimeError("用户已取消任务")
             if summary.sourced_candidate_count >= task.max_candidates:
+                return True
+            if max_round_candidates and round_stats["accepted_candidates"] >= max_round_candidates:
                 return True
             candidate_key = self._build_candidate_dedupe_key(candidate_summary)
             if candidate_key and candidate_key in seen_candidates:
@@ -277,9 +324,14 @@ class LiepinSearchTaskService:
             )
             if process_result:
                 round_stats["accepted_candidates"] += 1
+                if round_row_indexes is not None:
+                    round_row_indexes.append(process_result)
             else:
                 round_stats["failed_candidates"] += 1
-        return summary.sourced_candidate_count >= task.max_candidates
+        return summary.sourced_candidate_count >= task.max_candidates or (
+            bool(max_round_candidates)
+            and round_stats["accepted_candidates"] >= int(max_round_candidates)
+        )
 
     @staticmethod
     def _build_candidate_dedupe_key(candidate_summary: LiepinSearchCandidate) -> str:
@@ -303,7 +355,7 @@ class LiepinSearchTaskService:
         rank_index: int,
         summary: SearchTaskExecutionSummary,
         result_page,
-    ) -> bool:
+    ) -> Optional[int]:
         import time
         start_time = time.time()
         try:
@@ -317,7 +369,7 @@ class LiepinSearchTaskService:
         except Exception as exc:
             logger.error("[_process_candidate] save_candidate_summary failed: %s", exc)
             summary.failed_candidate_count += 1
-            return False
+            return None
         summary.sourced_candidate_count += 1
 
         self.task_repository.update_status(
@@ -373,7 +425,7 @@ class LiepinSearchTaskService:
                 )
                 summary.partial_candidate_count += 1
             logger.warning("[_process_candidate] rank=%s name=%s elapsed=%.2fs status=%s", rank_index, candidate_summary.name, time.time() - start_time, capture_status)
-            return True
+            return row_index
         except Exception as exc:
             logger.exception("[_process_candidate] rank=%s name=%s failed", rank_index, candidate_summary.name)
             try:
@@ -405,7 +457,7 @@ class LiepinSearchTaskService:
                     "capture_status": self.candidate_excel_service.CAPTURE_STATUS_FAILED,
                 }
             )
-            return False
+            return None
 
     def _persist_execution_progress(
         self,

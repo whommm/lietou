@@ -105,3 +105,21 @@ def test_build_from_analysis_result_prefers_embedded_search_intent_json():
         "结构 照明",
         "结构 灯具 散热",
     ]
+
+
+def test_build_from_analysis_result_extracts_liepin_filters():
+    service = SearchStrategyService()
+    html = """
+    <p>工作地点：深圳</p>
+    <p>要求：3-5年经验，本科及以上，性别不限</p>
+    <a href="copy://结构 灯具">结构 灯具</a>
+    """
+
+    strategy = service.build_from_analysis_result(html)
+    payload = service.to_payload(strategy)
+
+    assert strategy.filters["目前城市"] == ["深圳", "广州", "东莞", "惠州"]
+    assert strategy.filters["工作年限"] == "3-5年"
+    assert strategy.filters["教育经历"] == "本科"
+    assert strategy.filters["性别"] == "不限"
+    assert payload["filters"] == strategy.filters

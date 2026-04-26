@@ -6,6 +6,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Dict, List
 
+from ..utils.city_data import build_default_city_scope, extract_city_from_text
+
 
 @dataclass
 class SearchStrategy:
@@ -19,6 +21,7 @@ class SearchStrategy:
     source_company_hints: List[str] = field(default_factory=list)
     atomic_terms: Dict[str, List[str]] = field(default_factory=dict)
     executable_rounds: List[Dict[str, object]] = field(default_factory=list)
+    filters: Dict[str, object] = field(default_factory=dict)
 
 
 class SearchStrategyService:
@@ -129,6 +132,7 @@ class SearchStrategyService:
             boolean_queries=boolean_queries,
             search_intent=search_intent,
         )
+        filters = self.extract_filters_from_analysis(analysis_html)
 
         return SearchStrategy(
             precise_keywords=precise_keywords[:6],
@@ -139,6 +143,7 @@ class SearchStrategyService:
             source_company_hints=source_company_hints[:6],
             atomic_terms=atomic_terms,
             executable_rounds=executable_rounds,
+            filters=filters,
         )
 
     def to_payload(self, strategy: SearchStrategy) -> dict:
@@ -154,7 +159,79 @@ class SearchStrategyService:
                 key: list(values) for key, values in (strategy.atomic_terms or {}).items()
             },
             "executable_rounds": [dict(item) for item in strategy.executable_rounds],
+            "filters": dict(strategy.filters or {}),
         }
+
+    def extract_filters_from_analysis(self, analysis_html: str) -> Dict[str, object]:
+        """Extract conservative Liepin filters from the analysis/JD text."""
+        text = self._plain_text(analysis_html)
+        filters: Dict[str, object] = {}
+
+        city = extract_city_from_text(text)
+        city_scope = build_default_city_scope(city)
+        if city_scope:
+            filters["目前城市"] = city_scope
+
+        work_years = self._extract_work_years(text)
+        if work_years:
+            filters["工作年限"] = work_years
+
+        education = self._extract_education(text)
+        if education:
+            filters["教育经历"] = education
+
+        gender = self._extract_gender(text)
+        if gender:
+            filters["性别"] = gender
+
+        return filters
+
+    def _plain_text(self, html_text: str) -> str:
+        text = re.sub(r"<script[^>]*>.*?</script>", " ", html_text or "", flags=re.DOTALL | re.IGNORECASE)
+        text = self.HTML_TAG_PATTERN.sub(" ", text)
+        text = html.unescape(text)
+        return re.sub(r"\s+", " ", text).strip()
+
+    @staticmethod
+    def _extract_work_years(text: str) -> str:
+        patterns = [
+            (r"(\d+)\s*[-~至到]\s*(\d+)\s*年", "{}-{}年"),
+            (r"(\d+)\s*年\s*(?:及)?以上", "{}年以上"),
+            (r"(\d+)\s*年以上", "{}年以上"),
+            (r"经验不限|不限经验|工作年限不限", "不限"),
+        ]
+        for pattern, template in patterns:
+            match = re.search(pattern, text)
+            if not match:
+                continue
+            if "{}-{}" in template:
+                return template.format(match.group(1), match.group(2))
+            if "{}" in template:
+                return template.format(match.group(1))
+            return template
+        return ""
+
+    @staticmethod
+    def _extract_education(text: str) -> str:
+        if re.search(r"博士", text):
+            return "博士"
+        if re.search(r"硕士|研究生", text):
+            return "硕士"
+        if re.search(r"本科", text):
+            return "本科"
+        if re.search(r"大专|专科", text):
+            return "大专"
+        if re.search(r"学历不限", text):
+            return "不限"
+        return ""
+
+    @staticmethod
+    def _extract_gender(text: str) -> str:
+        if re.search(r"性别[:：\s]*(男|男性)|限男|男性优先", text):
+            return "男"
+        if re.search(r"性别[:：\s]*(女|女性)|限女|女性优先", text):
+            return "女"
+        return "不限"
 
     def _extract_search_intent_json(self, analysis_html: str) -> Dict[str, List[str]]:
         match = self.SEARCH_INTENT_SCRIPT_PATTERN.search(analysis_html or "")

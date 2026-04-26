@@ -111,6 +111,37 @@ def test_candidate_library_widget_imports_excel_through_handler():
     root.destroy()
 
 
+def test_candidate_library_widget_passes_confirmed_filters_to_handler():
+    root = create_root()
+    captured = {}
+    widget = CandidateLibraryWidget(
+        root,
+        on_launch_browser=lambda: None,
+        on_check_login=lambda: None,
+        on_run_task=lambda *args: captured.update(args=args),
+    )
+    widget.update_job_options(
+        ["结构工程师 [01-01 10:00]"],
+        {
+            "结构工程师 [01-01 10:00]": {
+                "strategy": {
+                    "filters": {"目前城市": ["深圳", "广州"], "工作年限": "3-5年"},
+                    "executable_rounds": [{"label": "主搜", "query": "结构 灯具"}],
+                }
+            }
+        },
+    )
+    widget._confirm_before_run = lambda job_label, payload: {"目前城市": ["深圳"], "工作年限": "3-5年"}
+
+    widget._on_run_task_click()
+
+    assert captured["args"][0] == "结构工程师 [01-01 10:00]"
+    assert captured["args"][2] == {"目前城市": ["深圳"], "工作年限": "3-5年"}
+
+    widget.destroy()
+    root.destroy()
+
+
 def test_candidate_library_widget_lists_source_keywords_in_candidate_records():
     root = create_root()
     widget = CandidateLibraryWidget(

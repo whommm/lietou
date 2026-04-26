@@ -227,12 +227,22 @@ class SearchServiceStub(LiepinSearchService):
 class BrowserManagerWithRun:
     def __init__(self, page):
         self.page = page
+        self.opened = 0
 
     def run_with_page(self, func):
         return func(self.page)
 
     def new_page(self):
         return self.page
+
+    def open_search_page(self):
+        self.opened += 1
+
+    def ensure_logged_in(self):
+        return None
+
+    def get_state(self):
+        return {}
 
     def export_debug_snapshot(self, reason):
         return ""
@@ -407,6 +417,52 @@ def test_apply_city_filter_uses_modal_search_and_confirm():
     assert city_input.filled == ["长沙"]
     assert suggest.clicked == 1
     assert confirm.clicked == 1
+
+
+def test_apply_city_filter_accepts_multiple_cities():
+    service = LiepinSearchService(DummyBrowserManager())
+    trigger = FakeStaticLocator(text="其他")
+    confirm = FakeStaticLocator(text="确认")
+    selected = []
+
+    class CityModal(FakeStaticLocator):
+        def locator(self, selector):
+            if selector.startswith("span.ant-tag.ant-tag-checkable"):
+                city = selector.split("has-text('", 1)[1].split("')", 1)[0]
+                item = FakeStaticLocator(text=city)
+                item.click = lambda timeout=None, city=city: selected.append(city)
+                return item
+            return super().locator(selector)
+
+    modal = CityModal(children={"button.ant-btn.ant-btn-primary": confirm})
+    page = FakeControlPage(
+        {
+            "div.search-item.sfilter-city span.btn-choose:has-text('其他')": trigger,
+            "div.ant-modal.city-modal": modal,
+        },
+        body_text="目前城市： 深圳 广州",
+    )
+
+    service._apply_city_filter(page, service.FILTER_FIELD_SPECS["目前城市"], ["深圳", "广州"])
+
+    assert trigger.clicked == 1
+    assert selected == ["深圳", "广州"]
+    assert confirm.clicked == 1
+
+
+def test_search_applies_filters_before_extracting_candidates():
+    page = FakeControlPage({}, body_text="工作年限： 3-5年")
+    browser_manager = BrowserManagerWithRun(page)
+    service = LiepinSearchService(browser_manager)
+    service._execute_search = lambda page, keyword: setattr(service, "executed_keyword", keyword)
+    service._apply_filters_on_page = lambda page, filters: setattr(service, "applied_filters", filters)
+    service.extract_candidates_from_page = lambda page: [LiepinSearchCandidate(name="张三")]
+
+    candidates = service.search("结构 灯具", filters={"工作年限": "3-5年"})
+
+    assert service.executed_keyword == "结构 灯具"
+    assert service.applied_filters == {"工作年限": "3-5年"}
+    assert candidates[0].name == "张三"
 
 
 def test_extract_current_page_candidates_uses_existing_page():

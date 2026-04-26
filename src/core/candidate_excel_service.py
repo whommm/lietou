@@ -188,6 +188,32 @@ class CandidateExcelService:
                 records.append(record)
         return records
 
+    def load_matchable_candidates_by_rows(
+        self, file_path: str, row_indexes: List[int]
+    ) -> List[CandidateExcelRecord]:
+        """Load matchable candidates whose Excel rows are in ``row_indexes``."""
+        target_rows = {int(row) for row in (row_indexes or []) if row}
+        if not target_rows:
+            return []
+        return [
+            record
+            for record in self.load_matchable_candidates(file_path)
+            if record.row_index in target_rows
+        ]
+
+    def load_matchable_candidates_by_source_keyword(
+        self, file_path: str, source_keyword: str
+    ) -> List[CandidateExcelRecord]:
+        """Load matchable candidates captured from one search query."""
+        source_keyword = (source_keyword or "").strip()
+        if not source_keyword:
+            return []
+        return [
+            record
+            for record in self.load_matchable_candidates(file_path)
+            if (record.source_keyword or "").strip() == source_keyword
+        ]
+
     def count_matchable_candidates(self, file_path: str) -> int:
         return len(self.load_matchable_candidates(file_path))
 
