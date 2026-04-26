@@ -355,8 +355,12 @@ def test_write_keyword_verifies_input_value():
 def test_apply_tag_filter_clicks_target_tag_and_waits():
     service = LiepinSearchService(DummyBrowserManager())
     target = FakeStaticLocator(text="1-3年")
+    container = FakeStaticLocator(
+        text="工作年限： 不限 应届生 1-3年",
+        children={"label.tag-item:has-text('1-3年')": target},
+    )
     page = FakeControlPage(
-        {"div.search-item.sfilter-work-year label.tag-item:has-text('1-3年')": target},
+        {"div.search-item.sfilter-work-year": container},
         body_text="工作年限： 1-3年",
     )
 
@@ -373,11 +377,14 @@ def test_apply_dropdown_filter_clicks_matching_option():
     options.count = lambda: 2
     options.nth = lambda index: [FakeStaticLocator(text="不限"), option_male][index]
     dropdown = FakeStaticLocator(children={"div.ant-select-item.ant-select-item-option": options})
-    container = FakeStaticLocator(children={"input.ant-select-selection-search-input": input_locator})
+    container = FakeStaticLocator(
+        text="性 别： 不限",
+        children={"input.ant-select-selection-search-input": input_locator},
+    )
     page = FakeControlPage(
         {
             "div.ant-select.ant-select-lg.h-select.sexSelectStyle.gray.ant-select-single.ant-select-show-arrow": container,
-            "div.ant-select-dropdown.search-select.ant-select-dropdown-placement-bottomLeft": dropdown,
+            "div.ant-select-dropdown.search-select": dropdown,
         },
         body_text="性 别： 男",
     )
@@ -402,10 +409,16 @@ def test_apply_city_filter_uses_modal_search_and_confirm():
             "button.ant-btn.ant-btn-primary": confirm,
         }
     )
+    container = FakeStaticLocator(
+        text="目前城市： 不限 其他",
+        children={
+            "label.tag-item:has-text('长沙')": FakeStaticLocator(visible=False),
+            "span.btn-choose:has-text('其他')": trigger,
+        },
+    )
     page = FakeControlPage(
         {
-            "div.search-item.sfilter-city label.tag-item:has-text('长沙')": FakeStaticLocator(visible=False),
-            "div.search-item.sfilter-city span.btn-choose:has-text('其他')": trigger,
+            "div.search-item.sfilter-city": container,
             "div.ant-modal.city-modal": modal,
         },
         body_text="目前城市： 长沙",
@@ -435,9 +448,13 @@ def test_apply_city_filter_accepts_multiple_cities():
             return super().locator(selector)
 
     modal = CityModal(children={"button.ant-btn.ant-btn-primary": confirm})
+    container = FakeStaticLocator(
+        text="目前城市： 不限 其他",
+        children={"span.btn-choose:has-text('其他')": trigger},
+    )
     page = FakeControlPage(
         {
-            "div.search-item.sfilter-city span.btn-choose:has-text('其他')": trigger,
+            "div.search-item.sfilter-city": container,
             "div.ant-modal.city-modal": modal,
         },
         body_text="目前城市： 深圳 广州",
@@ -447,6 +464,40 @@ def test_apply_city_filter_accepts_multiple_cities():
 
     assert trigger.clicked == 1
     assert selected == ["深圳", "广州"]
+    assert confirm.clicked == 1
+
+
+def test_apply_city_filter_uses_title_to_choose_expected_city_row():
+    service = LiepinSearchService(DummyBrowserManager())
+    current_trigger = FakeStaticLocator(text="目前其他")
+    expected_trigger = FakeStaticLocator(text="期望其他")
+    confirm = FakeStaticLocator(text="确认")
+    modal = FakeStaticLocator(
+        children={
+            "span.ant-tag.ant-tag-checkable:has-text('南京')": FakeStaticLocator(text="南京"),
+            "button.ant-btn.ant-btn-primary": confirm,
+        }
+    )
+    current = FakeStaticLocator(
+        text="目前城市： 不限 其他",
+        children={"span.btn-choose:has-text('其他')": current_trigger},
+    )
+    expected = FakeStaticLocator(
+        text="期望城市： 不限 其他",
+        children={"span.btn-choose:has-text('其他')": expected_trigger},
+    )
+    page = FakeControlPage(
+        {
+            "div.search-item.sfilter-city": FakeLocatorList([current, expected]),
+            "div.ant-modal.city-modal": modal,
+        },
+        body_text="期望城市： 南京",
+    )
+
+    service._apply_city_filter(page, service.FILTER_FIELD_SPECS["期望城市"], "南京")
+
+    assert current_trigger.clicked == 0
+    assert expected_trigger.clicked == 1
     assert confirm.clicked == 1
 
 

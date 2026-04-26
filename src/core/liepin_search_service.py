@@ -377,7 +377,6 @@ class LiepinSearchService:
         controls = self._detect_search_controls(page)
         if controls.search_input is None:
             raise LiepinSearchPageChangedError("未找到猎聘搜索输入框，请检查页面结构")
-        self._clear_search_inputs(page)
         self._write_keyword(controls.search_input, keyword)
         self._submit_search(page, controls)
         self._wait_for_results(page)
@@ -1375,23 +1374,57 @@ class LiepinSearchService:
             return
         raise LiepinSearchError("未实现的筛选字段类型: {}".format(spec.field_type))
 
+    def _field_container(self, page: Page, spec: LiepinFilterFieldSpec):
+        """Resolve one filter row by selector plus title text.
+
+        Several live fields share the same container selector, especially
+        current city and expected city. The mapping document says to bind fields
+        by title text + parent container, so do not blindly use `.first`.
+        """
+        containers = page.locator(spec.container_selector)
+        try:
+            count = containers.count()
+        except Exception:
+            count = 0
+        title_text = (spec.title_text or spec.title or "").replace(" ", "")
+        for index in range(count):
+            container = containers.nth(index)
+            try:
+                if not container.is_visible(timeout=1200):
+                    continue
+                text = (container.inner_text(timeout=1200) or "").replace(" ", "")
+                if title_text and title_text in text:
+                    return container
+            except Exception:
+                continue
+        if count:
+            return containers.first
+        return page.locator(spec.container_selector).first
+
     def _apply_tag_filter(self, page: Page, spec: LiepinFilterFieldSpec, value: str) -> None:
-        locator = page.locator(
-            "{} label.tag-item:has-text('{}')".format(spec.container_selector, value)
-        ).first
+        container = self._field_container(page, spec)
+        locator = container.locator("label.tag-item:has-text('{}')".format(value)).first
         if not locator.is_visible(timeout=3000):
             raise LiepinSearchPageChangedError("未找到标签筛选项: {} -> {}".format(spec.title, value))
         locator.click(timeout=5000)
         self._wait_for_filter_apply(page, expected_text=value)
 
     def _apply_dropdown_filter(self, page: Page, spec: LiepinFilterFieldSpec, value: str) -> None:
-        container = page.locator(spec.container_selector).first
+        container = self._field_container(page, spec)
         if not container.is_visible(timeout=3000):
             raise LiepinSearchPageChangedError("未找到下拉筛选控件: {}".format(spec.title))
         input_locator = container.locator("input.ant-select-selection-search-input").first
         input_locator.click(timeout=5000)
-        options = self._open_dropdown_options(page)
-        self._select_dropdown_option(options, value)
+        try:
+            input_locator.press("ArrowDown")
+        except Exception:
+            page.keyboard.press("ArrowDown")
+        page.wait_for_timeout(200)
+        try:
+            options = self._open_dropdown_options(page)
+            self._select_dropdown_option(options, value)
+        except Exception:
+            self._select_dropdown_option_by_keyboard(page, value)
         self._wait_for_filter_apply(page, expected_text=value)
 
     def _apply_city_filter(self, page: Page, spec: LiepinFilterFieldSpec, value: object) -> None:
@@ -1403,9 +1436,8 @@ class LiepinSearchService:
             self._apply_single_city_filter(page, spec, cities[0])
             return
 
-        trigger = page.locator(
-            "{} span.btn-choose:has-text('其他')".format(spec.container_selector)
-        ).first
+        container = self._field_container(page, spec)
+        trigger = container.locator("span.btn-choose:has-text('其他')").first
         if not trigger.is_visible(timeout=3000):
             raise LiepinSearchPageChangedError("未找到城市其他入口: {}".format(spec.title))
         trigger.click(timeout=5000)
@@ -1419,9 +1451,8 @@ class LiepinSearchService:
         self._wait_for_filter_apply(page, expected_text=cities[0])
 
     def _apply_single_city_filter(self, page: Page, spec: LiepinFilterFieldSpec, value: str) -> None:
-        hot_tag = page.locator(
-            "{} label.tag-item:has-text('{}')".format(spec.container_selector, value)
-        ).first
+        container = self._field_container(page, spec)
+        hot_tag = container.locator("label.tag-item:has-text('{}')".format(value)).first
         try:
             if hot_tag.is_visible(timeout=1200):
                 hot_tag.click(timeout=5000)
@@ -1430,9 +1461,7 @@ class LiepinSearchService:
         except Exception:
             pass
 
-        trigger = page.locator(
-            "{} span.btn-choose:has-text('其他')".format(spec.container_selector)
-        ).first
+        trigger = container.locator("span.btn-choose:has-text('其他')").first
         if not trigger.is_visible(timeout=3000):
             raise LiepinSearchPageChangedError("未找到城市其他入口: {}".format(spec.title))
         trigger.click(timeout=5000)
@@ -1461,9 +1490,7 @@ class LiepinSearchService:
             suggest.click(timeout=5000)
 
     def _open_dropdown_options(self, page: Page):
-        dropdown = page.locator(
-            "div.ant-select-dropdown.search-select.ant-select-dropdown-placement-bottomLeft"
-        ).first
+        dropdown = page.locator("div.ant-select-dropdown.search-select").first
         try:
             dropdown.wait_for(state="visible", timeout=1500)
             return dropdown.locator("div.ant-select-item.ant-select-item-option")
@@ -1485,6 +1512,22 @@ class LiepinSearchService:
                 option.click(timeout=5000)
                 return
         raise LiepinSearchPageChangedError("未找到下拉选项: {}".format(value))
+
+    @staticmethod
+    def _select_dropdown_option_by_keyboard(page: Page, value: str) -> None:
+        """Fallback for Ant Select fields where visible option locators are unstable."""
+        steps_by_value = {
+            "不限": 1,
+            "男": 2,
+            "女": 3,
+        }
+        steps = steps_by_value.get((value or "").strip())
+        if steps is None:
+            raise LiepinSearchPageChangedError("未找到下拉选项: {}".format(value))
+        for _ in range(max(0, steps - 1)):
+            page.keyboard.press("ArrowDown")
+            page.wait_for_timeout(120)
+        page.keyboard.press("Enter")
 
     def _wait_for_filter_apply(self, page: Page, expected_text: str = "", timeout: int = 12000) -> None:
         """Wait until the filter-driven refresh cycle settles."""
