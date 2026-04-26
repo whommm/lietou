@@ -40,6 +40,7 @@ from .company_research_widget import CompanyResearchWidget
 from .history_picker import HistoryPickerDialog
 from .selector_dialog import SelectorDialog
 from .job_analysis_widget import JobAnalysisWidget
+from .match_criteria_widget import MatchCriteriaWidget
 from .resume_match_widget import ResumeMatchWidget
 
 
@@ -110,6 +111,7 @@ class MainWindow(ctk.CTk):
         self._load_config_to_ui()
         self._update_resume_job_list()
         self._update_company_list()
+        self._update_match_criteria_job_list()
         self._update_candidate_job_list()
         self._update_batch_job_list()
 
@@ -264,12 +266,14 @@ class MainWindow(ctk.CTk):
 
         self.tab_company = self.tabview.add("公司调研")
         self.tab_job = self.tabview.add("岗位分析")
+        self.tab_criteria = self.tabview.add("匹配条件")
         self.tab_resume = self.tabview.add("简历匹配")
         self.tab_candidates = self.tabview.add("候选人抓取")
         self.tab_batch = self.tabview.add("批量匹配")
 
         self._build_company_research_tab()
         self._build_job_analysis_tab()
+        self._build_match_criteria_tab()
         self._build_resume_match_tab()
         self._build_candidate_library_tab()
         self._build_batch_match_tab()
@@ -294,6 +298,18 @@ class MainWindow(ctk.CTk):
         self.job_analysis_widget.grid(
             row=0, column=0, columnspan=2, sticky="nsew", padx=5, pady=5
         )
+
+    def _build_match_criteria_tab(self):
+        """构建独立匹配条件确认标签页。"""
+        self.tab_criteria.grid_columnconfigure(0, weight=1)
+        self.tab_criteria.grid_rowconfigure(0, weight=1)
+        self.match_criteria_widget = MatchCriteriaWidget(
+            self.tab_criteria,
+            on_pick_job_history=self._open_job_history_picker,
+            on_save=self._on_save_match_criteria_from_tab,
+            theme=self.FIXED_THEME,
+        )
+        self.match_criteria_widget.grid(row=0, column=0, sticky="nsew")
 
     def _build_resume_match_tab(self):
         """构建简历匹配标签页。"""
@@ -576,8 +592,25 @@ class MainWindow(ctk.CTk):
         target.match_criteria_confirmed = True
         self.job_history_manager.repository.upsert(target)
         self._update_resume_job_list()
+        self._update_match_criteria_job_list(selected_record=target)
         self._update_candidate_job_list()
         self._update_batch_job_list()
+
+    def _on_save_match_criteria_from_tab(self, job_label: str, payload: dict, criteria):
+        """Save edited match criteria from the standalone match criteria tab."""
+        record = self.job_history_manager.get_by_id(payload.get("record_id", ""))
+        if record is None:
+            messagebox.showwarning("提示", "未找到对应岗位记录")
+            return
+        record.match_criteria_json = json.dumps(criteria.to_dict(), ensure_ascii=False)
+        record.match_criteria_confirmed = True
+        self.job_history_manager.repository.upsert(record)
+        self._raw_result = record.result
+        self._current_jd = record.jd_text
+        self.job_analysis_widget.set_match_criteria(criteria)
+        self._update_match_criteria_job_list(selected_record=record)
+        self._update_candidate_job_list(selected_record=record)
+        self._update_batch_job_list(selected_record=record)
 
     def _find_company_context(self, company_title: str) -> str:
         """根据选项名查找公司调研上下文。"""
@@ -617,6 +650,7 @@ class MainWindow(ctk.CTk):
                 record.match_criteria_json = match_criteria_json
                 self.job_history_manager.repository.upsert(record)
             self._update_resume_job_list()
+            self._update_match_criteria_job_list(selected_record=record)
             self._update_candidate_job_list()
             self._update_batch_job_list()
         self._set_status("岗位分析完成，结果已保存到历史记录")
@@ -912,12 +946,14 @@ class MainWindow(ctk.CTk):
                 jd_text, analysis_result
             )
             self._update_resume_job_list()
+            self._update_match_criteria_job_list(selected_record=target_record)
 
         if target_record is None:
             messagebox.showwarning("提示", "未找到对应岗位记录，请先保存分析结果后再试")
             return
 
         self._update_candidate_job_list(selected_record=target_record)
+        self._update_match_criteria_job_list(selected_record=target_record)
         self.tabview.set("候选人抓取")
         self._set_status("已将岗位分析同步到候选人抓取页")
 
@@ -1453,6 +1489,29 @@ class MainWindow(ctk.CTk):
                 if selected_label:
                     self.candidate_library_widget.set_selected_job(selected_label)
 
+    def _update_match_criteria_job_list(self, selected_record=None):
+        """更新独立匹配条件页的岗位来源列表。"""
+        records = self.job_history_manager.get_all()
+        if not records:
+            if hasattr(self, "match_criteria_widget"):
+                self.match_criteria_widget.update_job_options(["请先分析岗位"], {})
+            return
+
+        job_options = []
+        job_data_map = {}
+        for index, record in enumerate(records[: self.MAX_JOB_OPTIONS]):
+            label = self._make_job_option_label(record, index)
+            job_options.append(label)
+            job_data_map[label] = self._build_candidate_job_payload(record)
+
+        if hasattr(self, "match_criteria_widget"):
+            self.match_criteria_widget.update_job_options(job_options, job_data_map)
+            if selected_record is not None:
+                for label, payload in job_data_map.items():
+                    if payload.get("record_id") == selected_record.id:
+                        self.match_criteria_widget.set_selected_job(label)
+                        break
+
     def _update_batch_job_list(self, selected_record=None):
         """更新批量匹配页的岗位列表。"""
         records = self.job_history_manager.get_all()
@@ -1551,6 +1610,12 @@ class MainWindow(ctk.CTk):
                 list(candidate_map.keys()), candidate_map
             )
             self.candidate_library_widget.set_selected_job(label)
+
+        if hasattr(self, "match_criteria_widget"):
+            self.match_criteria_widget.update_job_options(
+                list(candidate_map.keys()), candidate_map
+            )
+            self.match_criteria_widget.set_selected_job(label)
 
         if hasattr(self, "batch_match_widget"):
             self.batch_match_widget.update_job_options(
