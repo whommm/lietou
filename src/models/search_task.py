@@ -18,6 +18,9 @@ class SearchTask:
     status: str = "pending"
     current_step: str = ""
     error_message: str = ""
+    executed_queries_json: str = ""
+    query_level_stats_json: str = ""
+    search_control_snapshot_json: str = ""
     created_at: str = ""
     started_at: Optional[str] = None
     finished_at: Optional[str] = None

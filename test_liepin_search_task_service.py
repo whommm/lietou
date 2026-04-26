@@ -165,10 +165,17 @@ def test_run_task_executes_search_round_and_imports_candidates(tmp_path):
     assert len(search_service.closed_pages) == 2
     assert updated_task is not None
     assert updated_task.status == "completed"
+    assert updated_task.executed_queries_json
+    assert updated_task.query_level_stats_json
     assert len(records) == 2
     assert records[0].source_keyword == "算法工程师"
     assert records[0].resume_text
     assert records[0].capture_status == "抓取成功"
+    executed_queries = __import__("json").loads(updated_task.executed_queries_json)
+    query_stats = __import__("json").loads(updated_task.query_level_stats_json)
+    assert executed_queries[0]["query"] == "算法工程师"
+    assert query_stats[0]["accepted_candidates"] == 2
+    assert query_stats[0]["deduplicated_candidates"] == 0
     assert search_service.browser_manager.page.visited_urls == [
         "https://example.com/resume/1",
         "https://example.com/resume/2",
@@ -278,6 +285,9 @@ def test_run_task_processes_multiple_pages_until_limit(tmp_path):
     assert search_service.search_calls == ["后端工程师"]
     assert search_service.extract_calls == 1
     assert search_service.next_page_calls == 1
+    assert summary.query_level_stats[0]["pages_processed"] == 2
+    assert summary.query_level_stats[0]["raw_candidates"] == 4
+    assert summary.query_level_stats[0]["accepted_candidates"] == 3
     assert len(records) == 3
     assert {item.page_number for item in records} == {1, 2}
 
@@ -310,8 +320,38 @@ def test_run_task_deduplicates_candidates_across_rounds(tmp_path):
     )
 
     summary = service.run_task(task.id)
+    updated_task = task_repository.get_by_id(task.id)
     records = excel_service.load_candidates(summary.excel_path)
 
     assert summary.processed_keywords == ["算法 工程师", "推荐 系统"]
+    assert summary.query_level_stats[0]["accepted_candidates"] == 1
+    assert summary.query_level_stats[1]["accepted_candidates"] == 1
+    assert summary.query_level_stats[1]["deduplicated_candidates"] == 1
     assert len(records) == 2
     assert [item.source_keyword for item in records] == ["算法 工程师", "推荐 系统"]
+    stored_stats = __import__("json").loads(updated_task.query_level_stats_json)
+    assert stored_stats[1]["deduplicated_candidates"] == 1
+
+
+def test_search_task_repository_persists_execution_artifacts(tmp_path):
+    manager = DatabaseManager(db_path=os.path.join(tmp_path, "test.db"))
+    repository = SearchTaskRepository(manager)
+    task = repository.create(
+        job_history_id="job_004",
+        task_name="统计持久化",
+        keywords={"precise_keywords": ["算法工程师"]},
+    )
+
+    updated = repository.update_execution_artifacts(
+        task.id,
+        executed_queries=[{"query": "算法工程师", "priority": 1}],
+        query_level_stats=[{"query": "算法工程师", "accepted_candidates": 2}],
+        search_control_snapshot={"round_count": 1},
+    )
+    reloaded = repository.get_by_id(task.id)
+
+    assert updated is True
+    assert reloaded is not None
+    assert __import__("json").loads(reloaded.executed_queries_json)[0]["query"] == "算法工程师"
+    assert __import__("json").loads(reloaded.query_level_stats_json)[0]["accepted_candidates"] == 2
+    assert __import__("json").loads(reloaded.search_control_snapshot_json)["round_count"] == 1

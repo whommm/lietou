@@ -969,6 +969,21 @@ class MainWindow(ctk.CTk):
                         )
                     )
                 failed_preview = "\n失败示例：{}".format("；".join(failed_lines))
+            round_preview = ""
+            if summary.query_level_stats:
+                round_lines = []
+                for item in summary.query_level_stats[:4]:
+                    round_lines.append(
+                        "{}：{}，页数 {}，原始 {}，收录 {}，去重 {}".format(
+                            item.get("label") or "搜索轮次",
+                            item.get("query") or "",
+                            item.get("pages_processed", 0),
+                            item.get("raw_candidates", 0),
+                            item.get("accepted_candidates", 0),
+                            item.get("deduplicated_candidates", 0),
+                        )
+                    )
+                round_preview = "\n轮次统计：{}".format("；".join(round_lines))
             summary_text = (
                 "结果页入库完成：已处理 {} 页，来源标签 {} 个，收录线索 {} 位，完整简历 {} 位，待补抓 {} 位，失败 {} 位。\nExcel 文件：{}".format(
                     summary.pages_processed,
@@ -979,6 +994,7 @@ class MainWindow(ctk.CTk):
                     summary.failed_candidate_count,
                     summary.excel_path,
                 )
+                + round_preview
                 + failed_preview
             )
             task_info.summary = summary

@@ -1,8 +1,9 @@
 """Persist candidates from the current Liepin result page."""
 
+import json
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 from .candidate_excel_service import CandidateExcelService
 from .liepin_resume_extractor import LiepinResumeExtractionError, LiepinResumeExtractor
@@ -27,6 +28,7 @@ class SearchTaskExecutionSummary:
     failed_candidate_count: int = 0
     failed_candidates: List[dict] = field(default_factory=list)
     executed_rounds: List[dict] = field(default_factory=list)
+    query_level_stats: List[dict] = field(default_factory=list)
 
 
 class LiepinSearchTaskService:
@@ -66,6 +68,13 @@ class LiepinSearchTaskService:
                 task.task_name or "候选人"
             )
             seen_candidates = set()
+            control_snapshot = self._build_search_control_snapshot(rounds)
+            self.task_repository.update_execution_artifacts(
+                task.id,
+                executed_queries=[],
+                query_level_stats=[],
+                search_control_snapshot=control_snapshot,
+            )
             logger.warning("[run_task] task=%s rounds=%s max_pages=%s max_candidates=%s", task.id, len(rounds), task.max_pages, task.max_candidates)
 
             for round_index, round_info in enumerate(rounds, start=1):
@@ -83,6 +92,19 @@ class LiepinSearchTaskService:
                         "priority": round_info.get("priority") or round_index,
                     }
                 )
+                round_stats = {
+                    "round_index": round_index,
+                    "query": query,
+                    "label": round_info.get("label") or "第{}轮搜索".format(round_index),
+                    "priority": round_info.get("priority") or round_index,
+                    "pages_processed": 0,
+                    "raw_candidates": 0,
+                    "accepted_candidates": 0,
+                    "deduplicated_candidates": 0,
+                    "failed_candidates": 0,
+                }
+                summary.query_level_stats.append(round_stats)
+                self._persist_execution_progress(task.id, summary, control_snapshot)
                 self.task_repository.update_status(
                     task.id,
                     "running",
@@ -91,6 +113,7 @@ class LiepinSearchTaskService:
                 candidates = self.search_service.search(query)
                 round_pages_processed = 1
                 summary.pages_processed += 1
+                round_stats["pages_processed"] += 1
                 logger.warning("[run_task] round=%s query=%s page=%s extracted_candidates=%s", round_index, query, 1, len(candidates))
 
                 stop_round = self._process_candidate_batch(
@@ -100,8 +123,10 @@ class LiepinSearchTaskService:
                     page_number=1,
                     summary=summary,
                     seen_candidates=seen_candidates,
+                    round_stats=round_stats,
                     cancel_event=cancel_event,
                 )
+                self._persist_execution_progress(task.id, summary, control_snapshot)
                 if stop_round:
                     break
 
@@ -117,6 +142,7 @@ class LiepinSearchTaskService:
                     self.search_service.ensure_result_page()
                     round_pages_processed += 1
                     summary.pages_processed += 1
+                    round_stats["pages_processed"] += 1
                     self.task_repository.update_status(
                         task.id,
                         "running",
@@ -133,8 +159,10 @@ class LiepinSearchTaskService:
                         page_number=round_pages_processed,
                         summary=summary,
                         seen_candidates=seen_candidates,
+                        round_stats=round_stats,
                         cancel_event=cancel_event,
                     )
+                    self._persist_execution_progress(task.id, summary, control_snapshot)
                     if stop_round:
                         break
                 if summary.sourced_candidate_count >= task.max_candidates:
@@ -223,8 +251,10 @@ class LiepinSearchTaskService:
         page_number: int,
         summary: SearchTaskExecutionSummary,
         seen_candidates: set,
+        round_stats: dict,
         cancel_event=None,
     ) -> bool:
+        round_stats["raw_candidates"] += len(candidates or [])
         for rank_index, candidate_summary in enumerate(candidates, start=1):
             if cancel_event and cancel_event.is_set():
                 raise RuntimeError("用户已取消任务")
@@ -232,10 +262,11 @@ class LiepinSearchTaskService:
                 return True
             candidate_key = self._build_candidate_dedupe_key(candidate_summary)
             if candidate_key and candidate_key in seen_candidates:
+                round_stats["deduplicated_candidates"] += 1
                 continue
             if candidate_key:
                 seen_candidates.add(candidate_key)
-            self._process_candidate(
+            process_result = self._process_candidate(
                 task,
                 candidate_summary,
                 keyword,
@@ -244,6 +275,10 @@ class LiepinSearchTaskService:
                 summary,
                 None,
             )
+            if process_result:
+                round_stats["accepted_candidates"] += 1
+            else:
+                round_stats["failed_candidates"] += 1
         return summary.sourced_candidate_count >= task.max_candidates
 
     @staticmethod
@@ -268,7 +303,7 @@ class LiepinSearchTaskService:
         rank_index: int,
         summary: SearchTaskExecutionSummary,
         result_page,
-    ) -> None:
+    ) -> bool:
         import time
         start_time = time.time()
         try:
@@ -282,7 +317,7 @@ class LiepinSearchTaskService:
         except Exception as exc:
             logger.error("[_process_candidate] save_candidate_summary failed: %s", exc)
             summary.failed_candidate_count += 1
-            return
+            return False
         summary.sourced_candidate_count += 1
 
         self.task_repository.update_status(
@@ -338,6 +373,7 @@ class LiepinSearchTaskService:
                 )
                 summary.partial_candidate_count += 1
             logger.warning("[_process_candidate] rank=%s name=%s elapsed=%.2fs status=%s", rank_index, candidate_summary.name, time.time() - start_time, capture_status)
+            return True
         except Exception as exc:
             logger.exception("[_process_candidate] rank=%s name=%s failed", rank_index, candidate_summary.name)
             try:
@@ -369,6 +405,34 @@ class LiepinSearchTaskService:
                     "capture_status": self.candidate_excel_service.CAPTURE_STATUS_FAILED,
                 }
             )
+            return False
+
+    def _persist_execution_progress(
+        self,
+        task_id: str,
+        summary: SearchTaskExecutionSummary,
+        control_snapshot: dict,
+    ) -> None:
+        self.task_repository.update_execution_artifacts(
+            task_id,
+            executed_queries=summary.executed_rounds,
+            query_level_stats=summary.query_level_stats,
+            search_control_snapshot=control_snapshot,
+        )
+
+    @staticmethod
+    def _build_search_control_snapshot(rounds: List[dict]) -> dict:
+        return {
+            "round_count": len(rounds or []),
+            "queries": [
+                {
+                    "label": item.get("label") or "",
+                    "query": item.get("query") or "",
+                    "priority": item.get("priority") or 0,
+                }
+                for item in (rounds or [])
+            ],
+        }
 
     def _save_candidate_summary(
         self,

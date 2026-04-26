@@ -32,6 +32,9 @@ class SearchTaskRepository:
             status=row["status"],
             current_step=row["current_step"] or "",
             error_message=row["error_message"] or "",
+            executed_queries_json=row["executed_queries_json"] or "",
+            query_level_stats_json=row["query_level_stats_json"] or "",
+            search_control_snapshot_json=row["search_control_snapshot_json"] or "",
             created_at=row["created_at"],
             started_at=row["started_at"],
             finished_at=row["finished_at"],
@@ -63,8 +66,9 @@ class SearchTaskRepository:
                 INSERT INTO search_tasks (
                     id, job_history_id, task_name, keywords_json, search_mode,
                     max_pages, max_candidates, status, current_step,
-                    error_message, created_at, started_at, finished_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    error_message, executed_queries_json, query_level_stats_json,
+                    search_control_snapshot_json, created_at, started_at, finished_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     task.id,
@@ -77,6 +81,9 @@ class SearchTaskRepository:
                     task.status,
                     task.current_step,
                     task.error_message,
+                    task.executed_queries_json,
+                    task.query_level_stats_json,
+                    task.search_control_snapshot_json,
                     task.created_at,
                     task.started_at,
                     task.finished_at,
@@ -108,7 +115,7 @@ class SearchTaskRepository:
         error_message: str = "",
         mark_started: bool = False,
         mark_finished: bool = False,
-    ) -> bool:
+        ) -> bool:
         """Update a task status and lifecycle timestamps."""
         existing = self.get_by_id(task_id)
         if existing is None:
@@ -130,5 +137,34 @@ class SearchTaskRepository:
                 WHERE id = ?
                 """,
                 (status, current_step, error_message, started_at, finished_at, task_id),
+            )
+        return True
+
+    def update_execution_artifacts(
+        self,
+        task_id: str,
+        executed_queries: List[dict],
+        query_level_stats: List[dict],
+        search_control_snapshot: Optional[dict] = None,
+    ) -> bool:
+        existing = self.get_by_id(task_id)
+        if existing is None:
+            return False
+
+        with self.database.connect() as connection:
+            connection.execute(
+                """
+                UPDATE search_tasks
+                SET executed_queries_json = ?,
+                    query_level_stats_json = ?,
+                    search_control_snapshot_json = ?
+                WHERE id = ?
+                """,
+                (
+                    json.dumps(executed_queries or [], ensure_ascii=False),
+                    json.dumps(query_level_stats or [], ensure_ascii=False),
+                    json.dumps(search_control_snapshot or {}, ensure_ascii=False),
+                    task_id,
+                ),
             )
         return True

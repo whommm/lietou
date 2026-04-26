@@ -63,6 +63,9 @@ class DatabaseManager:
                     status TEXT NOT NULL,
                     current_step TEXT,
                     error_message TEXT,
+                    executed_queries_json TEXT,
+                    query_level_stats_json TEXT,
+                    search_control_snapshot_json TEXT,
                     created_at TEXT NOT NULL,
                     started_at TEXT,
                     finished_at TEXT
@@ -122,6 +125,23 @@ class DatabaseManager:
             if "match_criteria_confirmed" not in columns:
                 connection.execute(
                     "ALTER TABLE analysis_history ADD COLUMN match_criteria_confirmed BOOLEAN DEFAULT 0"
+                )
+
+            task_columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(search_tasks)").fetchall()
+            }
+            if "executed_queries_json" not in task_columns:
+                connection.execute(
+                    "ALTER TABLE search_tasks ADD COLUMN executed_queries_json TEXT"
+                )
+            if "query_level_stats_json" not in task_columns:
+                connection.execute(
+                    "ALTER TABLE search_tasks ADD COLUMN query_level_stats_json TEXT"
+                )
+            if "search_control_snapshot_json" not in task_columns:
+                connection.execute(
+                    "ALTER TABLE search_tasks ADD COLUMN search_control_snapshot_json TEXT"
                 )
 
             cursor = connection.execute("PRAGMA table_info(batch_match_results_v2)")
