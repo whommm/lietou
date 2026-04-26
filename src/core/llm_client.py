@@ -10,7 +10,7 @@ from openai import (
     APIConnectionError,
 )
 from typing import Optional
-from .prompt import SYSTEM_PROMPT, MATCH_CRITERIA_PROMPT_APPENDIX
+from .prompt import SYSTEM_PROMPT, SEARCH_INTENT_PROMPT_APPENDIX
 
 
 class LLMClientError(Exception):
@@ -141,7 +141,7 @@ class LLMClient:
             "messages": [
                 {
                     "role": "system",
-                    "content": SYSTEM_PROMPT + MATCH_CRITERIA_PROMPT_APPENDIX,
+                    "content": SYSTEM_PROMPT + SEARCH_INTENT_PROMPT_APPENDIX,
                 },
                 {"role": "user", "content": user_message},
             ],

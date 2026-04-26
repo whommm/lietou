@@ -222,10 +222,10 @@ SYSTEM_PROMPT = (
 """
 )
 
-MATCH_CRITERIA_PROMPT_APPENDIX = """
+SEARCH_INTENT_PROMPT_APPENDIX = """
 
-【匹配标准输出要求 - 必须严格遵守】
-请先在 HTML 报告内部、`猎聘搜索策略` 模块结束后，追加一个结构化搜索意图脚本节点，格式如下（不要转义成纯文本）：
+【可执行搜索意图输出要求 - 必须严格遵守】
+请在 HTML 报告内部、`猎聘搜索策略` 模块结束后，追加一个结构化搜索意图脚本节点，格式如下（不要转义成纯文本）：
 
 <script type="application/json" data-search-intent="true">
 {"domain_terms":["..."],"capability_terms":["..."],"process_terms":["..."],"object_terms":["..."],"exclude_terms":["..."],"recommended_rounds":["能力词 领域词","能力词 领域词 工艺词"]}
@@ -239,20 +239,7 @@ MATCH_CRITERIA_PROMPT_APPENDIX = """
 - `exclude_terms` 填需要主动排除的高噪音方向，例如 `建筑结构`
 - `recommended_rounds` 必须输出 3-6 条可直接用于猎聘搜索框执行的 query，优先使用 2-3 个短词组合，不要只给完整职位名
 
-然后在上述 HTML 报告结束后，紧接着输出一个可被程序直接解析的 JSON 对象（不要包裹在 Markdown 代码块 ``` 中），格式如下：
-
-{"dealbreakers":[{"id":"db_1","text":"...","enabled":true,"weight":0},...],"core_requirements":...,"basic_requirements":...,"bonuses":...,"misjudgment_reminders":[...],"version":1,"confirmed_at":"..."}
-
-字段说明：
-- dealbreakers: 一票否决项列表，每项包含 id, text, enabled, weight(固定0)
-- core_requirements: 核心要求列表，每项包含 id, text, enabled, weight(整数百分比，所有启用项之和必须等于100)
-- basic_requirements: 基础要求列表
-- bonuses: 加分项列表
-- misjudgment_reminders: 常见误判提醒文本列表，例如年限容错、地点容错、学历容错、技术栈替代规则
-- version: 固定 1
-- confirmed_at: 当前时间 ISO 格式
-
-严禁在匹配标准 JSON 前后添加任何说明文字或 Markdown 标记。匹配标准 JSON 必须紧跟在 HTML 内容之后，且为响应文本的最后部分。
+不要输出候选人匹配条件 JSON。匹配条件会由程序在岗位分析完成后单独调用一次 API 生成。
 """
 
 MATCH_CRITERIA_GENERATION_PROMPT = """
