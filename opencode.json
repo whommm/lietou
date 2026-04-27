@@ -12,9 +12,9 @@
         "--executable-path",
         "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
         "--user-data-dir",
-        "E:\\Myproject\\lietou\\browser_profile\\mcp-playwright",
+        "D:\\Lietou\\browser_profile\\mcp-playwright",
         "--output-dir",
-        "E:\\Myproject\\lietou\\debug_artifacts\\playwright-mcp",
+        "D:\\Lietou\\debug_artifacts\\playwright-mcp",
         "--save-session"
       ],
       "enabled": true,

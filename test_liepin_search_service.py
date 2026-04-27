@@ -1,4 +1,8 @@
-from src.core.liepin_search_service import LiepinSearchCandidate, LiepinSearchService
+from src.core.liepin_search_service import (
+    LiepinSearchCandidate,
+    LiepinSearchNoResultsError,
+    LiepinSearchService,
+)
 
 
 class FakeCard:
@@ -59,6 +63,9 @@ class FakeStaticLocator:
         return None
 
     def click(self, timeout=None):
+        self.clicked += 1
+
+    def focus(self):
         self.clicked += 1
 
     def fill(self, value):
@@ -148,6 +155,10 @@ class DummyBrowserManager:
     def set_active_page(page):
         pass
 
+    @staticmethod
+    def export_debug_snapshot(reason):
+        return ""
+
 
 class FakeInputLocator:
     def __init__(self, visible=True, disabled=None, readonly=None, input_type="text"):
@@ -212,6 +223,25 @@ class FakeSearchInputPage:
     def locator(self, selector):
         if selector == "input.search-component-input":
             return FakeLocatorList(self._items)
+        return FakeLocatorList([])
+
+
+class FakeSearchContainerPage:
+    def __init__(self, container, direct_inputs=None, ant_inputs=None, button=None):
+        self._container = container
+        self._direct_inputs = direct_inputs or []
+        self._ant_inputs = ant_inputs or []
+        self._button = button or FakeStaticLocator(visible=False)
+
+    def locator(self, selector):
+        if selector == "div.search-auto-complete-box":
+            return self._container
+        if selector == "input.search-component-input":
+            return FakeLocatorList(self._direct_inputs)
+        if selector == "input.ant-select-selection-search-input":
+            return FakeLocatorList(self._ant_inputs)
+        if selector == "button.search-btn":
+            return self._button
         return FakeLocatorList([])
 
 
@@ -343,6 +373,38 @@ def test_detect_search_controls_prefers_main_container_input_and_search_button()
     assert controls.search_input is search_input
 
 
+def test_detect_search_controls_ignores_keyword_mode_input_and_picks_widest_main_input():
+    service = LiepinSearchService(DummyBrowserManager())
+    mode_input = FakeInputLocator(visible=True, input_type="search")
+    mode_input.bounding_box = lambda: {"x": 45, "y": 142, "width": 108, "height": 42}
+    main_input = FakeInputLocator(visible=True, input_type="search")
+    main_input.bounding_box = lambda: {"x": 185, "y": 142, "width": 680, "height": 38}
+    narrow_input = FakeInputLocator(visible=True, input_type="search")
+    narrow_input.bounding_box = lambda: {"x": 118, "y": 213, "width": 266, "height": 30}
+    search_button = FakeStaticLocator(
+        text="搜 索",
+        attributes={"bounding_box": {"x": 874, "y": 1, "width": 98, "height": 42}},
+    )
+    container = FakeStaticLocator(
+        text="包含全部关键词 搜职位/公司/行业等（中文用空格隔开，英文用逗号隔开） 搜 索",
+        children={
+            "div.auto-input-wrap-v3 input.ant-select-selection-search-input": main_input,
+            "input.ant-select-selection-search-input": FakeLocatorList([mode_input, main_input]),
+        },
+    )
+    page = FakeSearchContainerPage(
+        container=container,
+        direct_inputs=[narrow_input],
+        ant_inputs=[mode_input, main_input, narrow_input],
+        button=search_button,
+    )
+
+    controls = service._detect_search_controls(page)
+
+    assert controls.search_button is search_button
+    assert controls.search_input is main_input
+
+
 def test_write_keyword_verifies_input_value():
     service = LiepinSearchService(DummyBrowserManager())
     locator = FakeInputLocator()
@@ -369,6 +431,23 @@ def test_apply_tag_filter_clicks_target_tag_and_waits():
     assert target.clicked == 1
 
 
+def test_apply_tag_filter_maps_work_years_to_existing_tag():
+    service = LiepinSearchService(DummyBrowserManager())
+    target = FakeStaticLocator(text="3-5年")
+    container = FakeStaticLocator(
+        text="工作年限： 不限 应届生 1-3年 3-5年 5-10年 10年以上",
+        children={"label.tag-item:has-text('3-5年')": target},
+    )
+    page = FakeControlPage(
+        {"div.search-item.sfilter-work-year": container},
+        body_text="工作年限： 3-5年",
+    )
+
+    service._apply_tag_filter(page, service.FILTER_FIELD_SPECS["工作年限"], "3年以上")
+
+    assert target.clicked == 1
+
+
 def test_apply_dropdown_filter_clicks_matching_option():
     service = LiepinSearchService(DummyBrowserManager())
     input_locator = FakeStaticLocator()
@@ -391,7 +470,8 @@ def test_apply_dropdown_filter_clicks_matching_option():
 
     service._apply_dropdown_filter(page, service.FILTER_FIELD_SPECS["性别"], "男")
 
-    assert input_locator.clicked == 1
+    assert container.clicked >= 1
+    assert input_locator.clicked >= 1
     assert option_male.clicked == 1
 
 
@@ -516,6 +596,22 @@ def test_search_applies_filters_before_extracting_candidates():
     assert candidates[0].name == "张三"
 
 
+def test_apply_filters_on_page_skips_unsupported_live_value():
+    page = FakeControlPage({}, body_text="")
+    service = LiepinSearchService(DummyBrowserManager())
+    calls = []
+
+    def fake_apply(page, title, value):
+        calls.append((title, value))
+        raise __import__("src.core.liepin_search_service", fromlist=["LiepinSearchPageChangedError"]).LiepinSearchPageChangedError("bad option")
+
+    service._apply_one_filter = fake_apply
+
+    service._apply_filters_on_page(page, {"工作年限": "3年以上"})
+
+    assert calls == [("工作年限", "3年以上")]
+
+
 def test_extract_current_page_candidates_uses_existing_page():
     page = FakePage()
     browser_manager = BrowserManagerWithRun(page)
@@ -558,6 +654,182 @@ def test_extract_candidates_from_page_falls_back_to_dom_rows():
     assert candidates[1].profile_url == "https://example.com/resume/2"
     assert candidates[0].result_index == 0
     assert candidates[1].result_index == 1
+
+
+def test_wait_for_results_accepts_dom_fallback_candidates(monkeypatch):
+    service = LiepinSearchService(DummyBrowserManager())
+
+    class EmptyLocator:
+        @property
+        def first(self):
+            return self
+
+        def wait_for(self, state=None, timeout=None):
+            raise RuntimeError("no selector match")
+
+        def count(self):
+            return 0
+
+    class ResultPage:
+        def locator(self, selector):
+            return EmptyLocator()
+
+        def wait_for_timeout(self, timeout):
+            return None
+
+    monkeypatch.setattr(service, "_is_loading", lambda page: False)
+    monkeypatch.setattr(
+        service,
+        "_extract_candidates_with_dom_fallback",
+        lambda page: [LiepinSearchCandidate(name="张三")],
+    )
+
+    service._wait_for_results(ResultPage())
+
+
+def test_wait_for_results_returns_quickly_when_any_selector_is_visible():
+    service = LiepinSearchService(DummyBrowserManager())
+
+    class InvisibleLocator:
+        @property
+        def first(self):
+            return self
+
+        def count(self):
+            return 0
+
+        def is_visible(self, timeout=None):
+            return False
+
+    class VisibleLocator(InvisibleLocator):
+        def count(self):
+            return 3
+
+        def is_visible(self, timeout=None):
+            return True
+
+    class ResultPage:
+        def locator(self, selector):
+            if selector == service.RESULT_CARD_SELECTORS[0]:
+                return VisibleLocator()
+            return InvisibleLocator()
+
+        def wait_for_timeout(self, timeout):
+            raise AssertionError("should not enter slow polling path")
+
+    service._wait_for_results(ResultPage())
+
+
+def test_wait_for_results_accepts_result_page_heuristics_without_card_selector():
+    service = LiepinSearchService(DummyBrowserManager())
+
+    class InvisibleLocator:
+        @property
+        def first(self):
+            return self
+
+        def count(self):
+            return 0
+
+        def is_visible(self, timeout=None):
+            return False
+
+    class VisibleLocator(InvisibleLocator):
+        def count(self):
+            return 1
+
+        def is_visible(self, timeout=None):
+            return True
+
+    class ResultPage:
+        def locator(self, selector):
+            if selector == 'input[name="res_id_encode"]':
+                return VisibleLocator()
+            return InvisibleLocator()
+
+        def wait_for_timeout(self, timeout):
+            raise AssertionError("should not wait once result heuristics match")
+
+    service._wait_for_results(ResultPage())
+
+
+def test_wait_for_results_raises_no_results_error_for_empty_page():
+    service = LiepinSearchService(DummyBrowserManager())
+
+    class EmptyLocator:
+        @property
+        def first(self):
+            return self
+
+        def count(self):
+            return 0
+
+        def is_visible(self, timeout=None):
+            return False
+
+        def inner_text(self, timeout=None):
+            return "没找到相关匹配项"
+
+    class ResultPage:
+        def locator(self, selector):
+            return EmptyLocator()
+
+        def wait_for_timeout(self, timeout):
+            return None
+
+    try:
+        service._wait_for_results(ResultPage())
+        raised = None
+    except Exception as exc:
+        raised = exc
+
+    assert isinstance(raised, LiepinSearchNoResultsError)
+
+
+def test_page_looks_empty_when_only_batch_view_is_present():
+    service = LiepinSearchService(DummyBrowserManager())
+
+    class EmptyLocator:
+        def __init__(self, count=0, text=""):
+            self._count = count
+            self._text = text
+
+        @property
+        def first(self):
+            return self
+
+        def count(self):
+            return self._count
+
+        def is_visible(self, timeout=None):
+            return self._count > 0
+
+        def inner_text(self, timeout=None):
+            return self._text
+
+    class ResultPage:
+        def locator(self, selector):
+            if selector == "body":
+                return EmptyLocator(text="批量查看")
+            if selector == 'button:has-text("批量查看")':
+                return EmptyLocator(count=1)
+            return EmptyLocator(count=0)
+
+    assert service._page_looks_empty(ResultPage()) is True
+
+
+def test_with_debug_snapshot_preserves_no_results_error(monkeypatch):
+    service = LiepinSearchService(DummyBrowserManager())
+    monkeypatch.setattr(service.browser_manager, "export_debug_snapshot", lambda reason: "D:/debug.txt")
+
+    try:
+        service._with_debug_snapshot("search_keyword_test", lambda: (_ for _ in ()).throw(LiepinSearchNoResultsError("empty")))
+        raised = None
+    except Exception as exc:
+        raised = exc
+
+    assert isinstance(raised, LiepinSearchNoResultsError)
+    assert "D:/debug.txt" in str(raised)
 
 
 def test_open_candidate_detail_switches_to_new_page_when_no_href():

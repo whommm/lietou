@@ -65,6 +65,7 @@ class JobAnalysisWidget(ctk.CTkFrame):
         history_manager: HistoryManager,
         company_options: List[str],
         on_send_to_candidates: Optional[Callable] = None,
+        on_auto_search_candidates: Optional[Callable] = None,
         on_pick_company_history: Optional[Callable] = None,
         on_history_changed: Optional[Callable] = None,
         on_save_match_criteria: Optional[Callable[[MatchCriteria], None]] = None,
@@ -75,6 +76,7 @@ class JobAnalysisWidget(ctk.CTkFrame):
         self.on_analyze = on_analyze
         self.history_manager = history_manager
         self.on_send_to_candidates = on_send_to_candidates
+        self.on_auto_search_candidates = on_auto_search_candidates
         self.on_pick_company_history = on_pick_company_history
         self.on_history_changed = on_history_changed
         self.on_save_match_criteria = on_save_match_criteria
@@ -214,6 +216,19 @@ class JobAnalysisWidget(ctk.CTkFrame):
             command=self._on_send_to_candidates_click,
         )
         self.send_candidates_btn.grid(row=0, column=2, padx=(5, 0), sticky="e")
+
+        self.auto_capture_btn = ctk.CTkButton(
+            btn_frame,
+            text="自动搜索并抓取",
+            width=150,
+            height=38,
+            corner_radius=18,
+            fg_color=colors["secondary"],
+            hover_color=colors["secondary_hover"],
+            text_color=colors["text"],
+            command=self._on_auto_capture_click,
+        )
+        self.auto_capture_btn.grid(row=0, column=3, padx=(5, 0), sticky="e")
 
     def _build_result_panel(self):
         """构建右侧结果面板。"""
@@ -368,6 +383,17 @@ class JobAnalysisWidget(ctk.CTkFrame):
             return
         self.on_send_to_candidates(jd_text, result)
 
+    def _on_auto_capture_click(self):
+        """直接从当前岗位分析启动自动搜索与抓取。"""
+        if not self.on_auto_search_candidates:
+            return
+        jd_text = self.get_jd_text()
+        result = self.get_result()
+        if not jd_text or not result:
+            messagebox.showwarning("提示", "请先完成岗位分析或加载一条历史记录")
+            return
+        self.on_auto_search_candidates(jd_text, result)
+
     def _show_history(self):
         """显示历史面板。"""
         self.result_tabview.grid_forget()
@@ -493,6 +519,7 @@ class JobAnalysisWidget(ctk.CTkFrame):
             self.clear_result_btn.configure(state="disabled")
             self.history_btn.configure(state="disabled")
             self.send_candidates_btn.configure(state="disabled")
+            self.auto_capture_btn.configure(state="disabled")
             self.company_display.configure(state="disabled")
             self.jd_textbox.configure(state="disabled")
         else:
@@ -503,6 +530,7 @@ class JobAnalysisWidget(ctk.CTkFrame):
             self.clear_result_btn.configure(state="normal")
             self.history_btn.configure(state="normal")
             self.send_candidates_btn.configure(state="normal")
+            self.auto_capture_btn.configure(state="normal")
             self.company_display.configure(state="normal")
             self.jd_textbox.configure(state="normal")
 

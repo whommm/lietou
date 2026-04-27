@@ -7,7 +7,11 @@ from typing import Callable, Dict, List, Optional
 
 from .candidate_excel_service import CandidateExcelService
 from .liepin_resume_extractor import LiepinResumeExtractionError, LiepinResumeExtractor
-from .liepin_search_service import LiepinSearchCandidate, LiepinSearchService
+from .liepin_search_service import (
+    LiepinSearchCandidate,
+    LiepinSearchNoResultsError,
+    LiepinSearchService,
+)
 from .search_task_repository import SearchTaskRepository
 from ..models import SearchTask
 
@@ -120,7 +124,14 @@ class LiepinSearchTaskService:
                     "running",
                     current_step="执行第 {} 轮搜索：{}".format(round_index, query),
                 )
-                candidates = self._search_with_filters(query, filters)
+                try:
+                    candidates = self._search_with_filters(query, filters)
+                except LiepinSearchNoResultsError as exc:
+                    logger.warning("[run_task] round=%s query=%s empty results: %s", round_index, query, exc)
+                    round_stats["pages_processed"] += 1
+                    summary.pages_processed += 1
+                    self._persist_execution_progress(task.id, summary, control_snapshot)
+                    continue
                 round_pages_processed = 1
                 summary.pages_processed += 1
                 round_stats["pages_processed"] += 1

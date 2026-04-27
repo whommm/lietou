@@ -293,6 +293,7 @@ class MainWindow(ctk.CTk):
             history_manager=self.job_history_manager,
             company_options=["不使用"],
             on_send_to_candidates=self._send_analysis_to_candidates,
+            on_auto_search_candidates=self._start_auto_capture_from_analysis,
             on_pick_company_history=self._open_company_history_picker,
             on_history_changed=self._update_company_list,
             on_save_match_criteria=self._on_save_match_criteria,
@@ -1007,6 +1008,30 @@ class MainWindow(ctk.CTk):
 
     def _send_analysis_to_candidates(self, jd_text: str, analysis_result: str):
         """将当前岗位分析结果同步到候选人抓取页。"""
+        target_record = self._resolve_analysis_record(jd_text, analysis_result)
+        if target_record is None:
+            messagebox.showwarning("提示", "未找到对应岗位记录，请先保存分析结果后再试")
+            return
+
+        self._update_candidate_job_list(selected_record=target_record)
+        self._update_match_criteria_job_list(selected_record=target_record)
+        self.tabview.set("候选人抓取")
+        self._set_status("已将岗位分析同步到候选人抓取页")
+
+    def _start_auto_capture_from_analysis(self, jd_text: str, analysis_result: str):
+        """从当前分析结果或历史岗位直接启动自动搜索与抓取。"""
+        target_record = self._resolve_analysis_record(jd_text, analysis_result)
+        if target_record is None:
+            messagebox.showwarning("提示", "未找到对应岗位记录，请先保存或重新加载该岗位分析")
+            return
+
+        self._update_candidate_job_list(selected_record=target_record)
+        self._update_match_criteria_job_list(selected_record=target_record)
+        self._update_batch_job_list(selected_record=target_record)
+        self._continue_to_candidate_capture(target_record)
+
+    def _resolve_analysis_record(self, jd_text: str, analysis_result: str):
+        """Find or persist the analysis record backing a UI action."""
         target_record = None
         for record in self.job_history_manager.get_all():
             if record.jd_text == jd_text and record.result == analysis_result:
@@ -1023,15 +1048,7 @@ class MainWindow(ctk.CTk):
             )
             self._update_resume_job_list()
             self._update_match_criteria_job_list(selected_record=target_record)
-
-        if target_record is None:
-            messagebox.showwarning("提示", "未找到对应岗位记录，请先保存分析结果后再试")
-            return
-
-        self._update_candidate_job_list(selected_record=target_record)
-        self._update_match_criteria_job_list(selected_record=target_record)
-        self.tabview.set("候选人抓取")
-        self._set_status("已将岗位分析同步到候选人抓取页")
+        return target_record
 
     def _on_run_candidate_task(
         self,

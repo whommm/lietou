@@ -739,6 +739,8 @@ class LiepinBrowserManager:
             url = (page.url or "").lower()
             if "login" in url or "passport" in url:
                 return False
+            if self._is_search_page_url(url):
+                return True
 
             text = page.locator("body").inner_text(timeout=3000)
         except Error:
@@ -748,11 +750,16 @@ class LiepinBrowserManager:
 
         logged_in_markers = (
             "退出登录",
+            "安全退出",
+            "个人中心",
+            "我的主页",
             "我的简历",
             "我的职位",
             "消息",
             "招聘官",
             "找人",
+            "找简历",
+            "人才管理",
         )
         login_markers = (
             "登录",

@@ -3,6 +3,7 @@ import os
 from src.core.candidate_excel_service import CandidateExcelService
 from src.core.database import DatabaseManager
 from src.core.liepin_search_service import LiepinSearchCandidate
+from src.core.liepin_search_service import LiepinSearchNoResultsError
 from src.core.liepin_search_task_service import LiepinSearchTaskService
 from src.core.search_task_repository import SearchTaskRepository
 from src.models import Candidate
@@ -419,3 +420,39 @@ def test_run_task_applies_filters_limits_each_round_and_callbacks(tmp_path):
         "结构 照明",
         "结构 照明",
     ]
+
+
+def test_run_task_skips_empty_round_and_continues_next_query(tmp_path):
+    class EmptyFirstSearchService(FakeSearchService):
+        def search(self, keyword, filters=None):
+            if keyword == "空关键词":
+                raise LiepinSearchNoResultsError("empty")
+            return super().search(keyword)
+
+    search_service = EmptyFirstSearchService(
+        query_sequences={
+            "命中关键词": [[LiepinSearchCandidate(name="张三", profile_url="https://example.com/resume/1")]],
+        }
+    )
+    task_repository, excel_service, service = build_service(tmp_path, search_service)
+    task = task_repository.create(
+        job_history_id="job_006",
+        task_name="空轮次继续",
+        keywords={
+            "executable_rounds": [
+                {"query": "空关键词", "label": "第一轮", "priority": 1},
+                {"query": "命中关键词", "label": "第二轮", "priority": 2},
+            ]
+        },
+        max_pages=1,
+        max_candidates=10,
+    )
+
+    summary = service.run_task(task.id)
+    records = excel_service.load_candidates(summary.excel_path)
+
+    assert summary.processed_keywords == ["空关键词", "命中关键词"]
+    assert summary.query_level_stats[0]["accepted_candidates"] == 0
+    assert summary.query_level_stats[1]["accepted_candidates"] == 1
+    assert len(records) == 1
+    assert records[0].source_keyword == "命中关键词"

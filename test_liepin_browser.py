@@ -82,3 +82,27 @@ def test_get_debug_dir_creates_expected_path(tmp_path):
 
     assert os.path.isdir(debug_dir)
     assert debug_dir.endswith(os.path.join("debug_artifacts", "liepin"))
+
+
+def test_is_logged_in_locked_accepts_hunter_workspace_markers(tmp_path):
+    class FakeContext:
+        def __init__(self, page):
+            self.pages = [page]
+
+    class FakePage:
+        url = "https://h.liepin.com/search/getConditionItem"
+
+        def locator(self, selector):
+            raise AssertionError("body text should not be needed for workspace URLs")
+
+        def is_closed(self):
+            return False
+
+    config_path = os.path.join(tmp_path, "config.json")
+    manager = ConfigManager(config_path=config_path)
+    browser = LiepinBrowserManager(config_manager=manager)
+    page = FakePage()
+    browser._page = page
+    browser._context = FakeContext(page)
+
+    assert browser._is_logged_in_locked() is True
