@@ -247,6 +247,7 @@ class LiepinSearchService:
 
     def _apply_filters_on_page(self, page: Page, filters: Dict[str, object]) -> None:
         """Apply supported filters to an already-open result page."""
+        self._dismiss_any_open_modal(page)
         normalized_filters = {
             (key or "").strip(): value for key, value in (filters or {}).items() if (key or "").strip()
         }
@@ -257,6 +258,7 @@ class LiepinSearchService:
                 self._apply_one_filter(page, title, value)
             except LiepinSearchPageChangedError as exc:
                 logger.warning("skip filter apply: %s=%s reason=%s", title, value, exc)
+                self._dismiss_any_open_modal(page)
 
     def extract_current_page_candidates(self) -> List[LiepinSearchCandidate]:
         """Parse candidate summaries from the current page without searching."""
@@ -1566,6 +1568,7 @@ class LiepinSearchService:
         locator = container.locator("label.tag-item:has-text('{}')".format(normalized_value)).first
         if not locator.is_visible(timeout=3000):
             raise LiepinSearchPageChangedError("未找到标签筛选项: {} -> {}".format(spec.title, normalized_value))
+        self._dismiss_any_open_modal(page)
         locator.click(timeout=5000)
         self._wait_for_filter_apply(page, expected_text=normalized_value)
 
@@ -1659,12 +1662,19 @@ class LiepinSearchService:
         trigger.click(timeout=5000)
         modal = page.locator("div.ant-modal.city-modal").first
         modal.wait_for(state="visible", timeout=5000)
-        for city in cities:
-            self._select_city_in_modal(modal, city)
-        confirm = modal.locator("button.ant-btn.ant-btn-primary").first
-        confirm.click(timeout=5000)
-        modal.wait_for(state="hidden", timeout=8000)
-        self._wait_for_filter_apply(page, expected_text=cities[0])
+        try:
+            for city in cities:
+                self._select_city_in_modal(modal, city)
+            confirm = self._resolve_city_modal_confirm_button(modal)
+            self._wait_for_enabled_locator(confirm, timeout=5000)
+            confirm.click(timeout=5000)
+            page.wait_for_timeout(500)
+            modal.wait_for(state="hidden", timeout=8000)
+            page.wait_for_timeout(300)
+            self._wait_for_filter_apply(page, expected_text=cities[0])
+        except LiepinSearchPageChangedError:
+            self._dismiss_any_open_modal(page)
+            raise
 
     def _apply_single_city_filter(self, page: Page, spec: LiepinFilterFieldSpec, value: str) -> None:
         container = self._field_container(page, spec)
@@ -1684,11 +1694,68 @@ class LiepinSearchService:
         modal = page.locator("div.ant-modal.city-modal").first
         modal.wait_for(state="visible", timeout=5000)
 
-        self._select_city_in_modal(modal, value)
-        confirm = modal.locator("button.ant-btn.ant-btn-primary").first
-        confirm.click(timeout=5000)
-        modal.wait_for(state="hidden", timeout=8000)
-        self._wait_for_filter_apply(page, expected_text=value)
+        try:
+            self._select_city_in_modal(modal, value)
+            confirm = self._resolve_city_modal_confirm_button(modal)
+            self._wait_for_enabled_locator(confirm, timeout=5000)
+            confirm.click(timeout=5000)
+            page.wait_for_timeout(500)
+            modal.wait_for(state="hidden", timeout=8000)
+            page.wait_for_timeout(300)
+            self._wait_for_filter_apply(page, expected_text=value)
+        except LiepinSearchPageChangedError:
+            self._dismiss_any_open_modal(page)
+            raise
+
+    def _dismiss_any_open_modal(self, page: Page) -> None:
+        """关闭页面上可能残留的城市选择模态框/遮罩层，防止遮挡后续交互。"""
+        # 策略1: 通过 JS 强制隐藏所有模态框相关元素（最可靠，不受动画影响）
+        try:
+            page.evaluate("""() => {
+                document.querySelectorAll('.ant-modal-wrap.antd-fd-city-modal, .ant-modal-mask, .ant-city-menu-list').forEach(function(el) {
+                    el.style.display = 'none';
+                    el.style.visibility = 'hidden';
+                    el.style.pointerEvents = 'none';
+                });
+                document.querySelectorAll('.ant-modal-wrap').forEach(function(el) {
+                    if (window.getComputedStyle(el).display !== 'none') {
+                        el.style.display = 'none';
+                    }
+                });
+            }""")
+        except Exception as exc:
+            logger.debug("JS dismiss modal failed: %s", exc)
+
+        # 策略2: 常规关闭方式
+        try:
+            modal = page.locator("div.ant-modal.city-modal, div.ant-modal-wrap.antd-fd-city-modal").first
+            if not modal.is_visible(timeout=1500):
+                return
+        except Exception:
+            return
+
+        logger.warning("检测到残留模态框，尝试关闭...")
+        try:
+            cancel = modal.locator('button:has-text("取消")').first
+            if cancel.is_visible(timeout=500):
+                cancel.click(timeout=3000)
+                page.wait_for_timeout(300)
+                return
+        except Exception:
+            pass
+        try:
+            close_btn = modal.locator("button.ant-modal-close, span.ant-modal-close-x").first
+            if close_btn.is_visible(timeout=500):
+                close_btn.click(timeout=3000)
+                page.wait_for_timeout(300)
+                return
+        except Exception:
+            pass
+        try:
+            page.keyboard.press("Escape")
+            page.wait_for_timeout(500)
+        except Exception:
+            pass
 
     def _select_city_in_modal(self, modal, value: str) -> None:
         hot_city = modal.locator("span.ant-tag.ant-tag-checkable:has-text('{}')".format(value)).first
@@ -1704,6 +1771,38 @@ class LiepinSearchService:
             suggest = modal.locator("div.suggest-list > ul > li").first
             suggest.wait_for(state="visible", timeout=5000)
             suggest.click(timeout=5000)
+
+    def _resolve_city_modal_confirm_button(self, modal):
+        confirm = modal.locator('button:has-text("确认")').first
+        try:
+            if confirm.is_visible(timeout=1200):
+                return confirm
+        except Exception:
+            pass
+        return modal.locator("button.ant-btn.ant-btn-primary").first
+
+    def _wait_for_enabled_locator(self, locator, timeout: int = 5000) -> None:
+        import time
+
+        deadline = time.time() + timeout / 1000.0
+        while time.time() < deadline:
+            if self._is_enabled_locator(locator):
+                return
+            try:
+                locator.wait_for(state="visible", timeout=300)
+            except Exception:
+                pass
+        raise LiepinSearchPageChangedError("城市筛选确认按钮未启用")
+
+    @staticmethod
+    def _is_enabled_locator(locator) -> bool:
+        try:
+            disabled = locator.get_attribute("disabled")
+            aria_disabled = (locator.get_attribute("aria-disabled") or "").lower()
+            class_name = locator.get_attribute("class") or ""
+            return disabled is None and aria_disabled != "true" and "disabled" not in class_name
+        except Exception:
+            return False
 
     def _open_dropdown_options(self, page: Page):
         dropdown = page.locator("div.ant-select-dropdown.search-select").first

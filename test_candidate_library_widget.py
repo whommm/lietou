@@ -131,7 +131,7 @@ def test_candidate_library_widget_passes_confirmed_filters_to_handler():
             }
         },
     )
-    widget._confirm_before_run = lambda job_label, payload: {"目前城市": ["深圳"], "工作年限": "3-5年"}
+    widget._confirm_before_run = lambda job_label, payload, auto_match_available=True: {"目前城市": ["深圳"], "工作年限": "3-5年"}
 
     widget._on_run_task_click()
 

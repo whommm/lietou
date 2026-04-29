@@ -68,6 +68,9 @@ class FakeStaticLocator:
     def focus(self):
         self.clicked += 1
 
+    def press(self, key):
+        return None
+
     def fill(self, value):
         self.filled.append(value)
 
@@ -512,6 +515,64 @@ def test_apply_city_filter_uses_modal_search_and_confirm():
     assert confirm.clicked == 1
 
 
+def test_apply_city_filter_waits_for_enabled_confirm_button():
+    service = LiepinSearchService(DummyBrowserManager())
+    trigger = FakeStaticLocator(text="其他")
+    city_input = FakeStaticLocator()
+
+    class ConfirmLocator(FakeStaticLocator):
+        def __init__(self):
+            super().__init__(text="确认", attributes={"disabled": "disabled", "class": "ant-btn ant-btn-primary disabled"})
+            self.get_attribute_calls = 0
+
+        def get_attribute(self, name, timeout=None):
+            if name in ("disabled", "class"):
+                self.get_attribute_calls += 1
+                if self.get_attribute_calls >= 3:
+                    if name == "disabled":
+                        return None
+                    return "ant-btn ant-btn-primary"
+            return super().get_attribute(name, timeout=timeout)
+
+    confirm = ConfirmLocator()
+
+    class SuggestLocator(FakeStaticLocator):
+        def click(self, timeout=None):
+            super().click(timeout=timeout)
+
+    suggest = SuggestLocator(text="湖南 · 长沙")
+    modal = FakeStaticLocator(
+        children={
+            'span.ant-tag.ant-tag-checkable:has-text(\'长沙\')': FakeStaticLocator(visible=False),
+            'input.ant-input[placeholder="搜索城市"]': city_input,
+            "div.suggest-list > ul > li": suggest,
+            'button:has-text("确认")': confirm,
+            "button.ant-btn.ant-btn-primary": FakeStaticLocator(text="确 定", attributes={"disabled": "disabled"}),
+        }
+    )
+    container = FakeStaticLocator(
+        text="目前城市： 不限 其他",
+        children={
+            "label.tag-item:has-text('长沙')": FakeStaticLocator(visible=False),
+            "span.btn-choose:has-text('其他')": trigger,
+        },
+    )
+    page = FakeControlPage(
+        {
+            "div.search-item.sfilter-city": container,
+            "div.ant-modal.city-modal": modal,
+        },
+        body_text="目前城市： 长沙",
+    )
+
+    service._apply_city_filter(page, service.FILTER_FIELD_SPECS["目前城市"], "长沙")
+
+    assert trigger.clicked == 1
+    assert city_input.filled == ["长沙"]
+    assert suggest.clicked == 1
+    assert confirm.clicked == 1
+
+
 def test_apply_city_filter_accepts_multiple_cities():
     service = LiepinSearchService(DummyBrowserManager())
     trigger = FakeStaticLocator(text="其他")
@@ -527,7 +588,10 @@ def test_apply_city_filter_accepts_multiple_cities():
                 return item
             return super().locator(selector)
 
-    modal = CityModal(children={"button.ant-btn.ant-btn-primary": confirm})
+    modal = CityModal(children={
+        'button:has-text("确认")': confirm,
+        "button.ant-btn.ant-btn-primary": FakeStaticLocator(text="确 定", attributes={"disabled": "disabled"}),
+    })
     container = FakeStaticLocator(
         text="目前城市： 不限 其他",
         children={"span.btn-choose:has-text('其他')": trigger},
@@ -555,6 +619,7 @@ def test_apply_city_filter_uses_title_to_choose_expected_city_row():
     modal = FakeStaticLocator(
         children={
             "span.ant-tag.ant-tag-checkable:has-text('南京')": FakeStaticLocator(text="南京"),
+            'button:has-text("确认")': confirm,
             "button.ant-btn.ant-btn-primary": confirm,
         }
     )

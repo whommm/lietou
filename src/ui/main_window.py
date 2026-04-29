@@ -349,6 +349,7 @@ class MainWindow(ctk.CTk):
             on_export_debug=self._on_export_liepin_debug,
             on_close_browser=self._on_close_liepin_browser,
             on_pick_job_history=self._open_job_history_picker,
+            get_auto_match_status=lambda: self._get_valid_llm_config_silent() is not None,
             theme=self.FIXED_THEME,
         )
         self.candidate_library_widget.grid(
@@ -1096,25 +1097,36 @@ class MainWindow(ctk.CTk):
         auto_match_config,
         auto_match_workers: int,
     ):
-        """后台执行当前结果页入库任务。"""
+        """后台执行当前结果页入库任务。全部搜索完成后统一触发批量匹配。"""
         try:
             task_info.auto_batch_task_ids = []
+            all_row_indexes: list = []
 
             def on_round_complete(excel_path, round_index, round_info, row_indexes, round_stats, search_task):
-                batch_task_id = self._submit_round_batch_match(
-                    payload=payload,
-                    excel_path=excel_path,
-                    round_index=round_index,
-                    round_info=round_info,
-                    row_indexes=row_indexes,
-                    auto_match_config=auto_match_config,
-                    max_workers=auto_match_workers,
-                )
-                if batch_task_id:
-                    task_info.auto_batch_task_ids.append(batch_task_id)
+                all_row_indexes.extend(row_indexes)
 
             def on_all_complete(summary_obj, _search_task):
                 task_info.all_complete_summary = summary_obj
+                if not auto_match_config:
+                    task_info.match_skipped_reason = "未配置有效的 LLM API，已跳过自动批量匹配"
+                    self._safe_after(
+                        lambda: messagebox.showwarning(
+                            "自动匹配已跳过",
+                            "候选人抓取已完成，但未配置有效的 LLM API，自动批量匹配已跳过。\n请配置 API 后手动执行批量匹配。"
+                        )
+                    )
+                    return
+                if all_row_indexes:
+                    unique_row_indexes = list(dict.fromkeys(all_row_indexes))
+                    batch_task_id = self._submit_batch_match_for_rows(
+                        payload=payload,
+                        excel_path=summary_obj.excel_path,
+                        row_indexes=unique_row_indexes,
+                        auto_match_config=auto_match_config,
+                        max_workers=auto_match_workers,
+                    )
+                    if batch_task_id:
+                        task_info.auto_batch_task_ids.append(batch_task_id)
 
             summary = self.liepin_search_task_service.run_task(
                 search_task_id,
@@ -1230,6 +1242,34 @@ class MainWindow(ctk.CTk):
             args=(url, key, model, payload, excel_path, candidates, match_criteria, max_workers),
         )
 
+    def _submit_batch_match_for_rows(
+        self,
+        payload: dict,
+        excel_path: str,
+        row_indexes: list,
+        auto_match_config,
+        max_workers: int,
+    ) -> str:
+        """全部搜索完成后统一提交批量匹配任务"""
+        if not auto_match_config or not row_indexes:
+            return ""
+        candidates = self.candidate_excel_service.load_matchable_candidates_by_rows(
+            excel_path, row_indexes
+        )
+        if not candidates:
+            return ""
+        match_criteria = self._load_match_criteria_from_payload(payload)
+        url, key, model = auto_match_config
+        task_name = "自动批量匹配 - 共{}位候选人".format(len(candidates))
+        return self.task_queue.submit(
+            name=task_name,
+            category=TaskCategory.COMPUTE,
+            target=self._do_batch_match,
+            args=(url, key, model, payload, excel_path, candidates, match_criteria, max_workers),
+            on_update=self._on_batch_match_task_update,
+            on_complete=self._on_batch_match_task_complete,
+        )
+
     def _on_candidate_task_complete(self, task):
         """结果页入库任务完成回调。"""
         self.candidate_library_widget.set_running(False)
@@ -1248,6 +1288,10 @@ class MainWindow(ctk.CTk):
         summary_text = getattr(task, "summary_text", "")
         excel_path = summary.excel_path if summary else ""
         search_task_id = summary.task_id if summary else ""
+        match_skipped = getattr(task, "match_skipped_reason", "")
+
+        if match_skipped:
+            summary_text += "\n\n【注意】{}".format(match_skipped)
 
         self._current_candidate_excel_path = excel_path
         self.candidate_library_widget.set_task_result(search_task_id, summary_text)
@@ -1257,7 +1301,10 @@ class MainWindow(ctk.CTk):
             excel_path,
             self.candidate_excel_service.count_matchable_candidates(excel_path),
         )
-        self._set_status("结果页入库完成")
+        if match_skipped:
+            self._set_status("结果页入库完成（{}）".format(match_skipped))
+        else:
+            self._set_status("结果页入库完成")
 
     def _on_run_batch_match(self, job_label: str, payload: dict):
         """发起批量匹配任务。"""
@@ -1329,6 +1376,15 @@ class MainWindow(ctk.CTk):
             task_info.excel_path = excel_path
             if cancel_event.is_set():
                 raise RuntimeError("用户已取消批量匹配")
+
+            # 弹出匹配开始提示
+            candidate_count = len(candidates)
+            self._safe_after(
+                lambda: self._show_auto_close_notification(
+                    "自动批量匹配已开始",
+                    "正在对 {} 位候选人进行匹配评分，结果将自动回写 Excel。\n您可继续使用其他功能。".format(candidate_count),
+                )
+            )
 
             client_factory = lambda: self._create_llm_client(url, key, model, 180)
             service = BatchMatchService(
@@ -1731,6 +1787,50 @@ class MainWindow(ctk.CTk):
     def _set_status(self, text: str):
         """设置状态栏文本。"""
         self.status_label.configure(text=text)
+
+    def _show_auto_close_notification(self, title: str, message: str, auto_close_ms: int = 4000):
+        """显示一个自动关闭的提示窗口"""
+        def _build():
+            dialog = ctk.CTkToplevel(self)
+            dialog.title(title)
+            dialog.geometry("440x200")
+            dialog.resizable(False, False)
+            dialog.lift()
+            dialog.attributes('-topmost', True)
+            dialog.grid_columnconfigure(0, weight=1)
+
+            colors = self.SURFACE_COLORS
+            ctk.CTkLabel(
+                dialog,
+                text=title,
+                font=ctk.CTkFont(size=16, weight="bold"),
+                text_color=colors["text"],
+            ).grid(row=0, column=0, padx=20, pady=(20, 10))
+            ctk.CTkLabel(
+                dialog,
+                text=message,
+                wraplength=400,
+                justify="left",
+                text_color=colors["muted"],
+            ).grid(row=1, column=0, padx=20, pady=(0, 15))
+
+            def _close():
+                if dialog.winfo_exists():
+                    dialog.destroy()
+
+            ctk.CTkButton(
+                dialog,
+                text="知道了",
+                width=100,
+                corner_radius=12,
+                command=_close,
+                fg_color=colors["accent"],
+                hover_color=colors["accent_hover"],
+                text_color="#f8fbff",
+            ).grid(row=2, column=0, padx=20, pady=(0, 20))
+            dialog.after(auto_close_ms, _close)
+
+        self._safe_after(_build)
 
     def on_closing(self):
         """安全关闭。"""

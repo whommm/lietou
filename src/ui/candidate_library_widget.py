@@ -60,7 +60,7 @@ class CityEditDialog(ctk.CTkToplevel):
 class AutoGrabConfirmDialog(ctk.CTkToplevel):
     """Modal 15-second confirmation dialog before automatic capture starts."""
 
-    def __init__(self, master, job_label: str, payload: dict, filters: Dict[str, object]):
+    def __init__(self, master, job_label: str, payload: dict, filters: Dict[str, object], auto_match_available: bool = True):
         super().__init__(master)
         self.title("自动抓取确认")
         self.geometry("620x520")
@@ -71,9 +71,12 @@ class AutoGrabConfirmDialog(ctk.CTkToplevel):
         self.job_label = job_label
         self.payload = payload or {}
         self.filters = dict(filters or {})
+        self.auto_match_available = auto_match_available
         self._build_ui()
         self.protocol("WM_DELETE_WINDOW", self._cancel)
         self.after(1000, self._tick)
+        self.lift()
+        self.attributes('-topmost', True)
 
     def _build_ui(self):
         self.grid_columnconfigure(0, weight=1)
@@ -99,6 +102,15 @@ class AutoGrabConfirmDialog(ctk.CTkToplevel):
 
         self.countdown_label = ctk.CTkLabel(self, text="15 秒后自动开始...")
         self.countdown_label.grid(row=6, column=0, padx=22, pady=(0, 18))
+
+        if not self.auto_match_available:
+            warning_label = ctk.CTkLabel(
+                self,
+                text="⚠️ 未配置有效的 LLM API，抓取后将不会自动进行批量匹配",
+                text_color="#e74c3c",
+                font=ctk.CTkFont(size=12, weight="bold"),
+            )
+            warning_label.grid(row=7, column=0, padx=22, pady=(0, 10), sticky="w")
 
     def _build_round_text(self) -> str:
         strategy = self.payload.get("strategy", {}) if self.payload else {}
@@ -192,6 +204,7 @@ class CandidateLibraryWidget(ctk.CTkFrame):
         on_export_debug: Optional[Callable] = None,
         on_close_browser: Optional[Callable] = None,
         on_pick_job_history: Optional[Callable] = None,
+        get_auto_match_status: Optional[Callable[[], bool]] = None,
         theme: str = "light",
         **kwargs,
     ):
@@ -205,6 +218,7 @@ class CandidateLibraryWidget(ctk.CTkFrame):
         self.on_export_debug = on_export_debug
         self.on_close_browser = on_close_browser
         self.on_pick_job_history = on_pick_job_history
+        self.get_auto_match_status = get_auto_match_status
         self.theme = theme
 
         self.job_options: List[str] = ["请先分析岗位"]
@@ -611,7 +625,10 @@ class CandidateLibraryWidget(ctk.CTkFrame):
         if max_candidates <= 0 or max_pages <= 0:
             messagebox.showwarning("提示", "抓取人数上限和页数必须大于 0")
             return
-        filters = self._confirm_before_run(job_label, payload)
+        auto_match_available = True
+        if callable(self.get_auto_match_status):
+            auto_match_available = self.get_auto_match_status()
+        filters = self._confirm_before_run(job_label, payload, auto_match_available)
         if filters is None:
             self._set_info_text("已取消自动抓取。")
             return
@@ -623,8 +640,8 @@ class CandidateLibraryWidget(ctk.CTkFrame):
         """Start the currently selected capture task, including confirmation dialog."""
         self._on_run_task_click()
 
-    def _confirm_before_run(self, job_label: str, payload: Dict[str, object]):
-        dialog = AutoGrabConfirmDialog(self, job_label, payload, self.current_filters)
+    def _confirm_before_run(self, job_label: str, payload: Dict[str, object], auto_match_available: bool = True):
+        dialog = AutoGrabConfirmDialog(self, job_label, payload, self.current_filters, auto_match_available)
         dialog.transient(self)
         dialog.grab_set()
         self.wait_window(dialog)

@@ -16,6 +16,9 @@ class SearchStrategy:
     precise_keywords: List[str] = field(default_factory=list)
     expansion_keywords: List[str] = field(default_factory=list)
     synonyms: List[str] = field(default_factory=list)
+    direct_keywords: List[str] = field(default_factory=list)
+    indirect_keywords: List[str] = field(default_factory=list)
+    long_tail_keywords: List[str] = field(default_factory=list)
     exclude_keywords: List[str] = field(default_factory=list)
     boolean_queries: List[str] = field(default_factory=list)
     source_company_hints: List[str] = field(default_factory=list)
@@ -117,6 +120,10 @@ class SearchStrategyService:
         if scene_keywords:
             synonyms = self._merge_unique_lists(synonyms, scene_keywords)
 
+        direct_keywords = self._take_short_terms(search_intent.get("direct_keywords", []))
+        indirect_keywords = self._take_short_terms(search_intent.get("indirect_keywords", []))
+        long_tail_keywords = self._take_short_terms(search_intent.get("long_tail_keywords", []))
+
         atomic_terms = self._build_atomic_terms(
             precise_keywords=precise_keywords,
             expansion_keywords=expansion_keywords,
@@ -138,6 +145,9 @@ class SearchStrategyService:
             precise_keywords=precise_keywords[:6],
             expansion_keywords=expansion_keywords[:6],
             synonyms=synonyms[:6],
+            direct_keywords=direct_keywords[:6],
+            indirect_keywords=indirect_keywords[:6],
+            long_tail_keywords=long_tail_keywords[:6],
             exclude_keywords=exclude_keywords[:6],
             boolean_queries=boolean_queries[:6],
             source_company_hints=source_company_hints[:6],
@@ -152,6 +162,9 @@ class SearchStrategyService:
             "precise_keywords": list(strategy.precise_keywords),
             "expansion_keywords": list(strategy.expansion_keywords),
             "synonyms": list(strategy.synonyms),
+            "direct_keywords": list(strategy.direct_keywords),
+            "indirect_keywords": list(strategy.indirect_keywords),
+            "long_tail_keywords": list(strategy.long_tail_keywords),
             "exclude_keywords": list(strategy.exclude_keywords),
             "boolean_queries": list(strategy.boolean_queries),
             "source_company_hints": list(strategy.source_company_hints),
@@ -401,18 +414,35 @@ class SearchStrategyService:
     ) -> List[Dict[str, object]]:
         if search_intent.get("recommended_rounds"):
             rounds = []
-            for index, query in enumerate(search_intent.get("recommended_rounds", []), start=1):
-                normalized = self._normalize_query(query)
-                if not normalized:
-                    continue
-                rounds.append(
-                    {
-                        "label": "第{}轮搜索".format(index),
-                        "query": normalized,
-                        "intent": "模型推荐轮次",
-                        "priority": index,
-                    }
-                )
+            for index, item in enumerate(search_intent.get("recommended_rounds", []), start=1):
+                if isinstance(item, dict):
+                    query = self._normalize_query(item.get("query", ""))
+                    if not query:
+                        continue
+                    rounds.append(
+                        {
+                            "label": item.get("intent") or "第{}轮搜索".format(index),
+                            "query": query,
+                            "intent": item.get("intent") or "模型推荐轮次",
+                            "priority": index,
+                            "match_mode": item.get("match_mode") or "all",
+                            "scope": item.get("scope") or "全部经历",
+                        }
+                    )
+                elif isinstance(item, str):
+                    normalized = self._normalize_query(item)
+                    if not normalized:
+                        continue
+                    rounds.append(
+                        {
+                            "label": "第{}轮搜索".format(index),
+                            "query": normalized,
+                            "intent": "模型推荐轮次",
+                            "priority": index,
+                            "match_mode": "all",
+                            "scope": "全部经历",
+                        }
+                    )
             if rounds:
                 return rounds
 

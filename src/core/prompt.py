@@ -113,7 +113,8 @@ SYSTEM_PROMPT = (
 
 <div class="card card-green">
   <h2>&#x1F50E; 招聘方真实诉求</h2>
-  <p><strong>表面要求：</strong>[概括JD表面写了什么]</p>
+  <p><strong>表面要求（What - 约占40%）：</strong>[概括JD表面写了什么]</p>
+  <p><strong>隐性需求（How/Why - 约占60%）：</strong>[推断招聘方没说出口的关键信息：团队真实文化、领导行事风格、岗位要解决的核心矛盾、未来3年KPI演变、晋升通道、薪酬溢价空间。这是决定候选人能否存活并做出业绩的关键]</p>
   <p><strong>真实重点：</strong>[推断招聘方真正最在意的1-3件事，并说明依据]</p>
   <p><strong>可能存在的水分或套话：</strong>[指出1-3处可能虚高、模糊或口号化的要求；若没有则写“未发现明显水分”]</p>
   <p><strong>岗位所在业务场景：</strong>[说明这个岗位最可能服务于什么业务阶段、产品环节或团队目标]</p>
@@ -145,49 +146,88 @@ SYSTEM_PROMPT = (
 </div>
 <p><strong>说明：</strong>[用1-2句话解释哪些门槛最不能放松，哪些条件可灵活处理]</p>
 
+<div class="card card-green">
+  <h2>&#x1F464; 人才画像六维构建</h2>
+  <p><strong>硬性指标基线：</strong>[学历、年限、职级、资质；注意设定弹性：选本科时同时包含硕博，年限只设下限不设最高，年龄原则上只写上限]</p>
+  <p><strong>专业技能：</strong>[核心技术栈、工具链、方法论；区分必需技能（放入AND条件）和加分技能（放入OR条件）]</p>
+  <p><strong>行业背景：</strong>[目标公司、细分行业、产业链位置；建议同时做排除法："哪些公司的人绝对不想要"]</p>
+  <p><strong>管理能力（如适用）：</strong>[团队规模、管理幅度、变革经验；区分基层主管/中层经理/高层VP不同权重]</p>
+  <p><strong>行为特质：</strong>[抗压性、协作风格、决策模式；可通过"创业经历""从0到1""变革管理"等间接关键词筛选]</p>
+  <p><strong>动机价值观：</strong>[职业目标、薪酬期望、风险偏好；直接影响沟通候选人时的"卖点设计"]</p>
+</div>
+
 <div class="card card-purple">
   <h2>&#x1F50D; 猎聘搜索策略</h2>
-  <p><strong>使用原则：</strong>请输出适合在猎聘上搜人的策略，不要只罗列泛词。必须同时给出第一轮精准搜索、第二轮扩池搜索、组合搜索公式和高噪音提醒。关键词应优先选择候选人职位名称、项目经历或技能标签里真实高频出现的写法。</p>
-  <p><strong>第一轮精准搜索词（优先用于快速命中核心人群）：</strong></p>
+  <p><strong>使用原则：</strong>请输出适合在猎聘上搜人的实战策略。关键词必须优先选择"候选人简历里真实会写出来的词"，而不是看起来专业但很少出现在简历中的理论词。必须区分直接关键词、间接关键词和长尾关键词三层体系。</p>
+
+  <p><strong>直接关键词（从JD表面直接提取，解决"找到同行"）：</strong></p>
   <div class="tag-cloud">
-    <a href="copy://[精准词1]" class="tag tag-blue" title="点击复制">[精准词1]</a>
-    <a href="copy://[精准词2]" class="tag tag-blue" title="点击复制">[精准词2]</a>
-    <a href="copy://[精准词3]" class="tag tag-blue" title="点击复制">[精准词3]</a>
+    <a href="copy://[直接词1]" class="tag tag-blue" title="点击复制">[直接词1]</a>
+    <a href="copy://[直接词2]" class="tag tag-blue" title="点击复制">[直接词2]</a>
+    <a href="copy://[直接词3]" class="tag tag-blue" title="点击复制">[直接词3]</a>
   </div>
-  <p><strong>第一轮使用建议：</strong>[说明为什么这些词最适合先搜，命中的是哪一类最核心候选人]</p>
-  <p><strong>第二轮扩池词（用于扩大召回，挖到别人没搜到的人）：</strong></p>
+  <p><small>直接词包括：岗位名称、技能标签、公司名称。注意使用"职称穷尽法"覆盖同一岗位的N种叫法。</small></p>
+
+  <p><strong>间接关键词（从职责本质剖析推导，解决"找到做过同样事的人"）：</strong></p>
   <div class="tag-cloud">
-    <a href="copy://[扩池词1]" class="tag tag-green" title="点击复制">[扩池词1]</a>
-    <a href="copy://[扩池词2]" class="tag tag-green" title="点击复制">[扩池词2]</a>
-    <a href="copy://[扩池词3]" class="tag tag-green" title="点击复制">[扩池词3]</a>
+    <a href="copy://[间接词1]" class="tag tag-green" title="点击复制">[间接词1]</a>
+    <a href="copy://[间接词2]" class="tag tag-green" title="点击复制">[间接词2]</a>
+    <a href="copy://[间接词3]" class="tag tag-green" title="点击复制">[间接词3]</a>
   </div>
-  <p><strong>第二轮使用建议：</strong>[说明这些词为什么适合扩池，以及可能找到哪些替代人选]</p>
-  <p><strong>同义岗位词 / 内部叫法 / 替代叫法：</strong></p>
+  <p><small>间接词包括：业务场景词、项目经验词、管理方法论词。这些词不会出现在岗位名称中，却是实际工作能力的直接体现。</small></p>
+
+  <p><strong>长尾关键词（从项目经验/业绩指标反推，精准度最高）：</strong></p>
   <div class="tag-cloud">
-    <a href="copy://[替代叫法1]" class="tag tag-orange" title="点击复制">[替代叫法1]</a>
-    <a href="copy://[替代叫法2]" class="tag tag-orange" title="点击复制">[替代叫法2]</a>
-    <a href="copy://[替代叫法3]" class="tag tag-orange" title="点击复制">[替代叫法3]</a>
+    <a href="copy://[长尾词1]" class="tag tag-orange" title="点击复制">[长尾词1]</a>
+    <a href="copy://[长尾词2]" class="tag tag-orange" title="点击复制">[长尾词2]</a>
+    <a href="copy://[长尾词3]" class="tag tag-orange" title="点击复制">[长尾词3]</a>
   </div>
-  <p><strong>核心能力 / 业务场景词：</strong></p>
+  <p><small>提示：约63%的优质候选人隐藏在长尾关键词中，长尾词的转化率通常是大词的2.8倍。</small></p>
+
+  <p><strong>职称穷尽（同一岗位的N种叫法）：</strong></p>
   <div class="tag-cloud">
-    <a href="copy://[场景词1]" class="tag tag-purple" title="点击复制">[场景词1]</a>
-    <a href="copy://[场景词2]" class="tag tag-purple" title="点击复制">[场景词2]</a>
-    <a href="copy://[场景词3]" class="tag tag-purple" title="点击复制">[场景词3]</a>
+    <a href="copy://[横向扩展词]" class="tag tag-purple" title="点击复制">[横向扩展词]</a>
+    <a href="copy://[纵向扩展词]" class="tag tag-purple" title="点击复制">[纵向扩展词]</a>
+    <a href="copy://[中英文扩展词]" class="tag tag-purple" title="点击复制">[中英文扩展词]</a>
   </div>
+  <p><small>横向扩展（同职级不同叫法）→ 纵向扩展（上下浮动一个职级）→ 中英文扩展 → 行业差异扩展</small></p>
+
+  <p><strong>渐进式搜索策略（4轮递进）：</strong></p>
+  <ol>
+    <li><strong>第1轮（测绘搜索，OR模式）：</strong>[用行业大词+同义岗位词建立基数池，了解人才分布。示例：(Java开发 OR Java工程师 OR J2EE) AND 半导体]</li>
+    <li><strong>第2轮（精准搜索，AND模式）：</strong>[用核心技能组合锁定同时满足多项硬性条件的人。示例："用户增长" AND (抖音 OR 快手) AND 3年以上]</li>
+    <li><strong>第3轮（深挖搜索，精确短语+长尾词）：</strong>[叠加项目经验/业绩关键词，用双引号精确短语排除噪声。示例："800V高压平台" AND 电池管理系统]</li>
+    <li><strong>第4轮（去噪搜索，NOT排除）：</strong>[主动排除不相关方向。示例：(算法 OR 机器学习) NOT "语音识别"]</li>
+  </ol>
+
+  <p><strong>按岗位类型的策略重心：</strong></p>
+  <div class="alert alert-info">
+    [如果是技术岗：四级递进——通用语言词→框架工具词→业务场景词→引擎基础设施词]
+    [如果是管理岗：团队规模词+业务指标词+管理方法论词（OKR、从0到1、变革管理）]
+    [如果是销售/市场岗：行业词+渠道词+业绩词（ARR、获客成本、区域增长）]
+    [如果是职能岗：专业资质词（CPA/CFA）+业务支持场景词]
+  </div>
+
+  <p><strong>匹配范围策略：</strong></p>
+  <p>[基层执行岗位建议"目前职位"（正在做）；中高层管理岗建议"全部经历"（曾经做过）或组合使用"过往职位=某岗位 AND 目前职位=管理岗"]</p>
+
   <p><strong>优先来源公司 / 团队线索：</strong></p>
   <div class="tag-cloud">
     <a href="copy://[来源公司1]" class="tag tag-purple" title="点击复制">[来源公司1]</a>
     <a href="copy://[来源公司2]" class="tag tag-purple" title="点击复制">[来源公司2]</a>
     <a href="copy://[来源公司3]" class="tag tag-purple" title="点击复制">[来源公司3]</a>
   </div>
+
   <p><strong>高噪音词提醒：</strong></p>
   <div class="alert alert-warning">[指出哪些词看起来相关，但单独搜索会引入大量噪音；并说明必须搭配什么词一起搜]</div>
-  <p><strong>推荐组合搜索公式：</strong></p>
+
+  <p><strong>推荐组合搜索公式（使用布尔语法）：</strong></p>
   <ol>
-    <li>[组合公式1：例如“岗位词 + 场景词”，并说明适合搜什么人]</li>
-    <li>[组合公式2：例如“替代叫法 + 技能词”，并说明适合搜什么人]</li>
-    <li>[组合公式3：例如“岗位词 + 来源公司线索”，并说明适合搜什么人]</li>
+    <li>[组合公式1：使用AND/OR/NOT/双引号/括号，说明match_mode和scope，并说明适合搜什么人]</li>
+    <li>[组合公式2：使用AND/OR/NOT/双引号/括号，说明match_mode和scope，并说明适合搜什么人]</li>
+    <li>[组合公式3：使用AND/OR/NOT/双引号/括号，说明match_mode和scope，并说明适合搜什么人]</li>
   </ol>
+
   <p><strong>排除 / 去噪思路：</strong>[说明哪些背景、方向或词应该主动排除，否则会出现大量不合适人选]</p>
 </div>
 
@@ -228,16 +268,42 @@ SEARCH_INTENT_PROMPT_APPENDIX = """
 请在 HTML 报告内部、`猎聘搜索策略` 模块结束后，追加一个结构化搜索意图脚本节点，格式如下（不要转义成纯文本）：
 
 <script type="application/json" data-search-intent="true">
-{"domain_terms":["..."],"capability_terms":["..."],"process_terms":["..."],"object_terms":["..."],"exclude_terms":["..."],"recommended_rounds":["能力词 领域词","能力词 领域词 工艺词"]}
+{
+  "direct_keywords": ["可从JD表面直接提取的职位名称、技能名称、公司名称"],
+  "indirect_keywords": ["从职责本质剖析推导的业务场景词、项目经验词、行业术语"],
+  "long_tail_keywords": ["从项目经验/业绩指标反推的精准长尾关键词"],
+  "synonyms": ["同义岗位词/职称变体/内部叫法/中英文叫法"],
+  "domain_terms": ["产品/行业/业务领域短词，例如 灯具、照明、LED"],
+  "capability_terms": ["核心能力短词，例如 结构、结构设计"],
+  "process_terms": ["关键工艺/方法短词，例如 散热、注塑、钣金"],
+  "object_terms": ["结构对象/模块短词，例如 外壳、支架、模组"],
+  "exclude_terms": ["需要主动排除的高噪音方向，例如 建筑结构"],
+  "recommended_rounds": [
+    {"query":"(Java OR Python) AND 微服务","match_mode":"all","scope":"全部经历","intent":"第1轮测绘搜索"},
+    {"query":"\\"用户增长\\" AND (抖音 OR 快手)","match_mode":"all","scope":"目前职位","intent":"第2轮精准搜索"},
+    {"query":"\\"800V高压平台\\" AND BMS","match_mode":"all","scope":"全部经历","intent":"第3轮深挖搜索"},
+    {"query":"(算法 OR 机器学习) NOT \"语音识别\"","match_mode":"all","scope":"全部经历","intent":"第4轮去噪搜索"}
+  ]
+}
 </script>
 
 要求：
-- `domain_terms` 填产品/行业/业务领域短词，例如 `灯具`、`照明`、`LED`
-- `capability_terms` 填核心能力短词，例如 `结构`、`结构设计`
-- `process_terms` 填关键工艺/方法短词，例如 `散热`、`注塑`、`钣金`
-- `object_terms` 填结构对象/模块短词，例如 `外壳`、`支架`、`模组`
-- `exclude_terms` 填需要主动排除的高噪音方向，例如 `建筑结构`
-- `recommended_rounds` 必须输出 3-6 条可直接用于猎聘搜索框执行的 query，优先使用 2-3 个短词组合，不要只给完整职位名
+- `direct_keywords`：从JD表面直接提取的字面关键词（职位名、技能名、公司名）
+- `indirect_keywords`：需通过剖析职责本质推导的关键词（业务场景、项目经验、行业术语）
+- `long_tail_keywords`：从工作成果/业绩指标/项目经验反推的精准长尾词，转化率通常是大词的2.8倍
+- `synonyms`：同一岗位的N种叫法，必须覆盖横向扩展、纵向扩展、中英文扩展、行业差异扩展
+- `domain_terms`：产品/行业/业务领域短词
+- `capability_terms`：核心能力短词
+- `process_terms`：关键工艺/方法短词
+- `object_terms`：结构对象/模块短词
+- `exclude_terms`：需要主动排除的高噪音方向
+- `recommended_rounds`：必须输出 3-6 条可直接用于猎聘搜索框执行的 query
+  - 必须使用布尔语法：AND（全部关键词/交集）、OR（任意关键词/并集）、NOT（排除/可用减号-替代）、双引号""（精确短语）、括号()（优先级）
+  - match_mode 取值："all"（全部关键词，AND逻辑）或 "any"（任意关键词，OR逻辑）
+  - scope 取值："全部经历"、"目前职位"、"过往职位"
+  - intent 说明该轮次的搜索目的（如"第1轮测绘搜索""第2轮精准搜索"）
+  - 优先使用 2-3 个短词组合，不要只给完整职位名
+  - 必须体现"渐进式搜索"：先宽后窄，先OR测绘再AND精准
 
 不要输出候选人匹配条件 JSON。匹配条件会由程序在岗位分析完成后单独调用一次 API 生成。
 """
