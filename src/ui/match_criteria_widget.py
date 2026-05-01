@@ -60,13 +60,13 @@ class MatchCriteriaWidget(ctk.CTkFrame):
 
         ctk.CTkLabel(
             left,
-            text="匹配条件",
+            text="关键词匹配",
             font=ctk.CTkFont(size=20, weight="bold"),
             text_color=colors["text"],
         ).grid(row=0, column=0, padx=16, pady=(16, 4), sticky="w")
         ctk.CTkLabel(
             left,
-            text="先确认硬门槛、核心要求和加分项，再进入候选人抓取。",
+            text="先确认核心命中词、相邻相关词和排除词，再进入候选人抓取。",
             font=ctk.CTkFont(size=12),
             text_color=colors["muted"],
             justify="left",
@@ -147,9 +147,9 @@ class MatchCriteriaWidget(ctk.CTkFrame):
                 criteria = None
         if criteria is None:
             criteria = MatchCriteria()
-            self.status_label.configure(text="该岗位还没有已确认的匹配条件，可先在岗位分析页生成后再保存。")
+            self.status_label.configure(text="该岗位还没有已确认的关键词匹配规则，可先在岗位分析页生成后再保存。")
         else:
-            self.status_label.configure(text="已加载匹配条件，编辑后点击底部保存。")
+            self.status_label.configure(text="已加载关键词匹配规则，编辑后点击底部保存。")
         self.editor.set_criteria(criteria, set_as_default=True)
 
     def _on_editor_save(self, criteria: MatchCriteria):
@@ -159,4 +159,4 @@ class MatchCriteriaWidget(ctk.CTkFrame):
             return
         if self.on_save:
             self.on_save(self._selected_label, payload, criteria)
-        self.status_label.configure(text="匹配条件已保存并确认。")
+        self.status_label.configure(text="关键词匹配规则已保存并确认。")

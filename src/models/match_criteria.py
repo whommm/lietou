@@ -11,7 +11,7 @@ class MatchCriterionItem:
     id: str
     text: str
     enabled: bool = True
-    weight: int = 0  # Only used by core_requirements
+    weight: int = 0  # Kept for backward compatibility; keyword rules do not use scoring weights.
 
 
 @dataclass
@@ -100,11 +100,7 @@ class MatchCriteria:
     def validate(self) -> List[str]:
         """Return a list of human-readable validation errors."""
         errors = []
-        active_core = [c for c in self.core_requirements if c.enabled]
+        active_core = [c for c in self.core_requirements if c.enabled and c.text.strip()]
         if not active_core:
-            errors.append("至少要有 1 条启用的核心要求")
-        else:
-            total_weight = sum(c.weight for c in active_core)
-            if total_weight != 100:
-                errors.append(f"核心要求权重之和必须等于 100，当前为 {total_weight}")
+            errors.append("至少要有 1 条启用的核心命中词")
         return errors

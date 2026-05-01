@@ -211,16 +211,23 @@ def test_batch_match_service_uses_match_criteria_in_prompt():
         core_requirements=[
             MatchCriterionItem(id="core_1", text="Java", enabled=True, weight=100)
         ],
+        basic_requirements=[
+            MatchCriterionItem(id="br_1", text="分布式 / 微服务", enabled=True)
+        ],
         misjudgment_reminders=["年限±6个月视为匹配"],
     )
     prompt = service._build_batch_match_prompt(
         job_description="JD",
-        resume="简历",
+        resume="候选人具备 Java 和分布式项目经验",
         match_criteria=criteria,
     )
-    assert "<一票否决项>" in prompt
+    assert "<排除词 / 负向方向>" in prompt
+    assert "<核心命中词>" in prompt
     assert "5年以上经验" in prompt
     assert "Java" in prompt
+    assert "系统预扫描命中" in prompt
+    assert "核心命中词命中：Java" in prompt
+    assert "相邻相关词命中：分布式" in prompt
     assert "年限±6个月视为匹配" in prompt
 
 
@@ -245,7 +252,7 @@ class FakeFactoryLLMClient:
 
 
 def test_batch_match_service_runs_excel_candidates_concurrently():
-    tiers = ["A", "B", "S", "C", "A"]
+    tiers = ["A", "B", "D", "C", "A"]
     factory_calls = {"count": 0}
 
     def factory():

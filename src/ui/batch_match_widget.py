@@ -400,10 +400,10 @@ class BatchMatchWidget(ctk.CTkFrame):
     def set_match_results(self, results: List[dict]):
         """Display batch match results with tier classification."""
         TIER_LABELS = {
-            "S": "🟢 S（强推）",
-            "A": "🔵 A（深聊）",
-            "B": "🟡 B（观望）",
-            "C": "🔴 C（放弃）",
+            "A": "A（优先深聊）",
+            "B": "B（可聊待验证）",
+            "C": "C（低优先级）",
+            "D": "D（不建议）",
         }
         lines = ["批量匹配完成，结果摘要：\n"]
         for r in results:
@@ -419,9 +419,9 @@ class BatchMatchWidget(ctk.CTkFrame):
             tier_text = TIER_LABELS.get(tier, tier) if tier else "待解析"
             lines.append(f"{name} — {tier_text}")
             if dealbreaker:
-                lines.append("  ⚠️ 命中一票否决项")
+                lines.append("  ├─ 命中排除词/负向方向")
             if core_total > 0:
-                lines.append(f"  ├─ 核心要求符合：{core_met}/{core_total}")
+                lines.append(f"  ├─ 核心命中：{core_met}/{core_total}")
             if recommendation:
                 lines.append(f"  ├─ 建议：{recommendation}")
             if risks:

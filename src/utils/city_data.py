@@ -48,16 +48,18 @@ def normalize_city(value: str) -> str:
 def extract_city_from_text(text: str) -> str:
     """Extract the first known city from JD or analysis text."""
     text = re.sub(r"<[^>]+>", " ", text or "")
-    for city in KNOWN_CITIES:
-        if re.search(r"(?<![\u4e00-\u9fff]){}(?:市)?(?![\u4e00-\u9fff])".format(re.escape(city)), text):
-            return city
     for pattern in (
-        r"(?:工作地点|工作地址|所在城市|城市|地点)[:：\s]*([\u4e00-\u9fff]{2,6})",
+        r"(?:工作地点|工作地址|办公地点|所在城市|城市|地点)[:：\s]*([\u4e00-\u9fff]{2,6})(?:市)?",
         r"([\u4e00-\u9fff]{2,6})市",
     ):
         match = re.search(pattern, text)
         if match:
-            return normalize_city(match.group(1))
+            city = normalize_city(match.group(1))
+            if city in KNOWN_CITIES:
+                return city
+    for city in KNOWN_CITIES:
+        if re.search(r"(?<![\u4e00-\u9fff]){}(?:市)?(?![\u4e00-\u9fff])".format(re.escape(city)), text):
+            return city
     return ""
 
 

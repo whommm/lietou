@@ -478,6 +478,32 @@ def test_apply_dropdown_filter_clicks_matching_option():
     assert option_male.clicked == 1
 
 
+def test_apply_activity_filter_clicks_recent_week_option():
+    service = LiepinSearchService(DummyBrowserManager())
+    input_locator = FakeStaticLocator()
+    option_week = FakeStaticLocator(text="近一周")
+    options = FakeStaticLocator(children={})
+    options.count = lambda: 2
+    options.nth = lambda index: [FakeStaticLocator(text="不限"), option_week][index]
+    dropdown = FakeStaticLocator(children={"div.ant-select-item.ant-select-item-option": options})
+    container = FakeStaticLocator(
+        text="活跃度： 不限",
+        children={"input.ant-select-selection-search-input": input_locator},
+    )
+    page = FakeControlPage(
+        {
+            "div.search-item:has-text('活跃度') div.ant-select": container,
+            "div.ant-select-dropdown.search-select": dropdown,
+        },
+        body_text="活跃度： 近一周",
+    )
+
+    service._apply_dropdown_filter(page, service.FILTER_FIELD_SPECS["活跃度"], "7天内")
+
+    assert container.clicked >= 1
+    assert option_week.clicked == 1
+
+
 def test_apply_city_filter_uses_modal_search_and_confirm():
     service = LiepinSearchService(DummyBrowserManager())
     trigger = FakeStaticLocator(text="其他")
@@ -659,6 +685,23 @@ def test_search_applies_filters_before_extracting_candidates():
     assert service.executed_keyword == "结构 灯具"
     assert service.applied_filters == {"工作年限": "3-5年"}
     assert candidates[0].name == "张三"
+
+
+def test_search_passes_position_filter_to_execute_search():
+    page = FakeControlPage({}, body_text="")
+    browser_manager = BrowserManagerWithRun(page)
+    service = LiepinSearchService(browser_manager)
+    calls = []
+
+    def fake_execute(page, keyword, match_mode="", scope="", position_filter=""):
+        calls.append((keyword, match_mode, scope, position_filter))
+
+    service._execute_search = fake_execute
+    service.extract_candidates_from_page = lambda page: [LiepinSearchCandidate(name="张三")]
+
+    service.search("潮玩 文创", match_mode="all", scope="全部经历", position_filter="产品")
+
+    assert calls == [("潮玩 文创", "all", "全部经历", "产品")]
 
 
 def test_apply_filters_on_page_skips_unsupported_live_value():
@@ -879,6 +922,28 @@ def test_page_looks_empty_when_only_batch_view_is_present():
             if selector == 'button:has-text("批量查看")':
                 return EmptyLocator(count=1)
             return EmptyLocator(count=0)
+
+    assert service._page_looks_empty(ResultPage()) is True
+
+
+def test_page_looks_empty_for_liepin_empty_resume_message():
+    service = LiepinSearchService(DummyBrowserManager())
+
+    class EmptyLocator:
+        def __init__(self, text=""):
+            self._text = text
+
+        def inner_text(self, timeout=None):
+            return self._text
+
+        def count(self):
+            return 0
+
+    class ResultPage:
+        def locator(self, selector):
+            if selector == "body":
+                return EmptyLocator("没有找到符合条件的简历，建议您重新搜索!")
+            return EmptyLocator()
 
     assert service._page_looks_empty(ResultPage()) is True
 

@@ -20,8 +20,8 @@ def test_match_criteria_service_generates_valid_criteria():
                 {"id": "db_1", "text": "无相关行业经验", "enabled": True, "weight": 0}
             ],
             "core_requirements": [
-                {"id": "cr_1", "text": "结构设计", "enabled": True, "weight": 60},
-                {"id": "cr_2", "text": "灯具经验", "enabled": True, "weight": 40},
+                {"id": "cr_1", "text": "灯具 / 照明", "enabled": True, "weight": 0},
+                {"id": "cr_2", "text": "结构设计", "enabled": True, "weight": 0},
             ],
             "basic_requirements": [
                 {"id": "br_1", "text": "本科", "enabled": True, "weight": 0}
@@ -30,7 +30,7 @@ def test_match_criteria_service_generates_valid_criteria():
                 {"id": "bo_1", "text": "散热经验", "enabled": True, "weight": 0}
             ],
             "misjudgment_reminders": ["不要只看职位名"],
-            "version": 1,
+            "version": 2,
             "confirmed_at": "",
         },
         ensure_ascii=False,
@@ -39,8 +39,8 @@ def test_match_criteria_service_generates_valid_criteria():
 
     criteria = service.generate("<html>分析</html>", "深圳灯具结构工程师")
 
-    assert criteria.core_requirements[0].text == "结构设计"
-    assert sum(item.weight for item in criteria.core_requirements) == 100
+    assert criteria.core_requirements[0].text == "灯具 / 照明"
+    assert criteria.version == 2
     assert "深圳灯具结构工程师" in service.llm_client.prompts[0]
 
 
@@ -56,7 +56,7 @@ def test_match_criteria_service_falls_back_on_invalid_json():
 def test_match_criteria_service_extracts_from_analysis_tail():
     raw = """
     <html>报告</html>
-    {"dealbreakers":[],"core_requirements":[{"id":"cr_1","text":"算法","enabled":true,"weight":100}],"basic_requirements":[],"bonuses":[],"misjudgment_reminders":[],"version":1,"confirmed_at":""}
+    {"dealbreakers":[],"core_requirements":[{"id":"cr_1","text":"算法","enabled":true,"weight":0}],"basic_requirements":[],"bonuses":[],"misjudgment_reminders":[],"version":2,"confirmed_at":""}
     """
     service = MatchCriteriaService(FakeLLMClient(""))
 

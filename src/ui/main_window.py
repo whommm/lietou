@@ -29,6 +29,7 @@ from ..core.llm_client import (
     TimeoutError,
 )
 from ..core.prompt import RESUME_MATCH_PROMPT
+from ..core.search_strategy_generation_service import SearchStrategyGenerationService
 from ..core.search_strategy_service import SearchStrategyService
 from ..core.search_task_repository import SearchTaskRepository
 from ..core.task_queue import TaskCategory, TaskQueue
@@ -43,6 +44,7 @@ from .selector_dialog import SelectorDialog
 from .job_analysis_widget import JobAnalysisWidget
 from .match_criteria_widget import MatchCriteriaWidget
 from .resume_match_widget import ResumeMatchWidget
+from .search_strategy_widget import SearchStrategyWidget
 
 
 class MainWindow(ctk.CTk):
@@ -115,6 +117,7 @@ class MainWindow(ctk.CTk):
         self._update_resume_job_list()
         self._update_company_list()
         self._update_match_criteria_job_list()
+        self._update_search_strategy_job_list()
         self._update_candidate_job_list()
         self._update_batch_job_list()
 
@@ -270,6 +273,7 @@ class MainWindow(ctk.CTk):
         self.tab_company = self.tabview.add("公司调研")
         self.tab_job = self.tabview.add("岗位分析")
         self.tab_criteria = self.tabview.add("匹配条件")
+        self.tab_search_strategy = self.tabview.add("搜索关键词")
         self.tab_resume = self.tabview.add("简历匹配")
         self.tab_candidates = self.tabview.add("候选人抓取")
         self.tab_batch = self.tabview.add("批量匹配")
@@ -277,6 +281,7 @@ class MainWindow(ctk.CTk):
         self._build_company_research_tab()
         self._build_job_analysis_tab()
         self._build_match_criteria_tab()
+        self._build_search_strategy_tab()
         self._build_resume_match_tab()
         self._build_candidate_library_tab()
         self._build_batch_match_tab()
@@ -314,6 +319,19 @@ class MainWindow(ctk.CTk):
             theme=self.FIXED_THEME,
         )
         self.match_criteria_widget.grid(row=0, column=0, sticky="nsew")
+
+    def _build_search_strategy_tab(self):
+        """构建独立搜索关键词确认标签页。"""
+        self.tab_search_strategy.grid_columnconfigure(0, weight=1)
+        self.tab_search_strategy.grid_rowconfigure(0, weight=1)
+        self.search_strategy_widget = SearchStrategyWidget(
+            self.tab_search_strategy,
+            on_pick_job_history=self._open_job_history_picker,
+            on_save=self._on_save_search_strategy_from_tab,
+            on_regenerate=self._on_regenerate_search_strategy_from_tab,
+            theme=self.FIXED_THEME,
+        )
+        self.search_strategy_widget.grid(row=0, column=0, sticky="nsew")
 
     def _build_resume_match_tab(self):
         """构建简历匹配标签页。"""
@@ -540,10 +558,12 @@ class MainWindow(ctk.CTk):
 
     def _build_candidate_job_payload(self, record) -> dict:
         """为候选人抓取页构建岗位与搜索策略数据。"""
-        strategy = self.search_strategy_service.build_from_analysis_result(
-            "{}\n{}".format(record.result or "", record.jd_text or "")
-        )
-        strategy_payload = self.search_strategy_service.to_payload(strategy)
+        strategy_payload = self._load_record_search_strategy_payload(record)
+        if strategy_payload is None:
+            strategy = self.search_strategy_service.build_from_analysis_result(
+                "{}\n{}".format(record.result or "", record.jd_text or "")
+            )
+            strategy_payload = self.search_strategy_service.to_payload(strategy)
         return {
             "record_id": record.id,
             "title": record.title,
@@ -553,6 +573,22 @@ class MainWindow(ctk.CTk):
             "strategy_round_count": len(strategy_payload.get("executable_rounds", [])),
             "match_criteria": record.match_criteria_json or "",
         }
+
+    def _load_record_search_strategy_payload(self, record) -> Optional[dict]:
+        """Return persisted dedicated search strategy payload when available."""
+        raw_json = getattr(record, "search_strategy_json", "") or ""
+        if not raw_json:
+            return None
+        try:
+            payload = json.loads(raw_json)
+        except (TypeError, ValueError):
+            return None
+        if not isinstance(payload, dict):
+            return None
+        rounds = payload.get("executable_rounds", [])
+        if not isinstance(rounds, list) or not rounds:
+            return None
+        return payload
 
     def _run_threaded_task(self, thread_attr: str, target, args: tuple):
         """启动后台线程任务。"""
@@ -598,6 +634,7 @@ class MainWindow(ctk.CTk):
         self.job_history_manager.repository.upsert(target)
         self._update_resume_job_list()
         self._update_match_criteria_job_list(selected_record=target)
+        self._update_search_strategy_job_list(selected_record=target)
         self._update_candidate_job_list()
         self._update_batch_job_list()
 
@@ -614,6 +651,7 @@ class MainWindow(ctk.CTk):
         self._current_jd = record.jd_text
         self.job_analysis_widget.set_match_criteria(criteria)
         self._update_match_criteria_job_list(selected_record=record)
+        self._update_search_strategy_job_list(selected_record=record)
         self._update_candidate_job_list(selected_record=record)
         self._update_batch_job_list(selected_record=record)
 
@@ -657,6 +695,7 @@ class MainWindow(ctk.CTk):
                 self.job_history_manager.repository.upsert(record)
             self._update_resume_job_list()
             self._update_match_criteria_job_list(selected_record=record)
+            self._update_search_strategy_job_list(selected_record=record)
             self._update_candidate_job_list()
             self._update_batch_job_list()
         self._set_status("岗位分析完成，结果已保存到历史记录")
@@ -814,8 +853,144 @@ class MainWindow(ctk.CTk):
         self.job_history_manager.repository.upsert(record)
         self.job_analysis_widget.set_match_criteria(criteria)
         self._update_match_criteria_job_list(selected_record=record)
+        self._update_search_strategy_job_list(selected_record=record)
         self._update_candidate_job_list(selected_record=record)
         self._update_batch_job_list(selected_record=record)
+        self.after(200, lambda: self._start_auto_search_strategy_after_criteria(record))
+
+    def _on_save_search_strategy_from_tab(self, job_label: str, payload: dict, strategy_payload: dict):
+        """Save edited search strategy from the standalone search keyword tab."""
+        record = self.job_history_manager.get_by_id(payload.get("record_id", ""))
+        if record is None:
+            messagebox.showwarning("提示", "未找到对应岗位记录")
+            return
+        record.search_strategy_json = json.dumps(strategy_payload or {}, ensure_ascii=False)
+        record.search_strategy_confirmed = True
+        self.job_history_manager.repository.upsert(record)
+        self._raw_result = record.result
+        self._current_jd = record.jd_text
+        self._update_search_strategy_job_list(selected_record=record)
+        self._update_candidate_job_list(selected_record=record)
+        self._update_batch_job_list(selected_record=record)
+        self._set_status("搜索关键词已保存")
+
+    def _on_regenerate_search_strategy_from_tab(self, job_label: str, payload: dict):
+        """Regenerate search strategy for the selected job without starting capture."""
+        record = self.job_history_manager.get_by_id(payload.get("record_id", ""))
+        if record is None:
+            messagebox.showwarning("提示", "未找到对应岗位记录")
+            return
+        config = self._get_valid_llm_config_silent()
+        self._set_status("正在单独重新生成搜索关键词...")
+        self._run_threaded_task(
+            "_manual_search_strategy_thread",
+            self._do_manual_search_strategy,
+            (record.id, config),
+        )
+
+    def _do_manual_search_strategy(self, record_id: str, config):
+        """Regenerate search strategy from the standalone tab."""
+        try:
+            record = self.job_history_manager.get_by_id(record_id)
+            if record is None:
+                raise RuntimeError("未找到岗位记录")
+            if config:
+                url, key, model = config
+                client = self._create_llm_client(url, key, model, self.config_manager.config.timeout)
+                service = SearchStrategyGenerationService(client)
+                strategy = service.generate(record.result, record.jd_text)
+            else:
+                strategy = self.search_strategy_service.build_from_analysis_result(
+                    "{}\n{}".format(record.result or "", record.jd_text or "")
+                )
+            self._safe_after(
+                self._on_manual_search_strategy_complete, record_id, strategy, None
+            )
+        except Exception as exc:
+            self._safe_after(
+                self._on_manual_search_strategy_complete, record_id, None, str(exc)
+            )
+
+    def _on_manual_search_strategy_complete(self, record_id: str, strategy, error: Optional[str]):
+        """Persist manually regenerated search strategy and refresh the tab."""
+        record = self.job_history_manager.get_by_id(record_id)
+        if record is None:
+            messagebox.showwarning("提示", "搜索关键词生成后未找到岗位记录")
+            return
+        if strategy is None:
+            strategy = self.search_strategy_service.build_from_analysis_result(
+                "{}\n{}".format(record.result or "", record.jd_text or "")
+            )
+        strategy_payload = self.search_strategy_service.to_payload(strategy)
+        record.search_strategy_json = json.dumps(strategy_payload, ensure_ascii=False)
+        record.search_strategy_confirmed = True
+        self.job_history_manager.repository.upsert(record)
+        self._update_search_strategy_job_list(selected_record=record)
+        self._update_candidate_job_list(selected_record=record)
+        self._update_batch_job_list(selected_record=record)
+        if error:
+            self._set_status("搜索关键词重新生成失败，已使用本地保底策略：{}".format(error))
+        else:
+            self._set_status("搜索关键词已重新生成并保存")
+
+    def _start_auto_search_strategy_after_criteria(self, record):
+        """Generate executable search rounds in a dedicated API call before capture."""
+        self.tabview.set("搜索关键词")
+        self._update_search_strategy_job_list(selected_record=record)
+        self._set_status("匹配条件已生成，正在单独生成猎聘搜索关键词...")
+        config = self._last_analysis_llm_config or self._get_valid_llm_config_silent()
+        if not config:
+            strategy = self.search_strategy_service.build_from_analysis_result(
+                "{}\n{}".format(record.result or "", record.jd_text or "")
+            )
+            self._on_auto_search_strategy_complete(record.id, strategy, None)
+            return
+        self._run_threaded_task(
+            "_auto_search_strategy_thread",
+            self._do_auto_search_strategy,
+            (record.id, config),
+        )
+
+    def _do_auto_search_strategy(self, record_id: str, config):
+        """Generate search strategy in a dedicated background API call."""
+        try:
+            record = self.job_history_manager.get_by_id(record_id)
+            if record is None:
+                raise RuntimeError("未找到岗位记录")
+            url, key, model = config
+            client = self._create_llm_client(url, key, model, self.config_manager.config.timeout)
+            service = SearchStrategyGenerationService(client)
+            strategy = service.generate(record.result, record.jd_text)
+            self._safe_after(
+                self._on_auto_search_strategy_complete, record_id, strategy, None
+            )
+        except Exception as exc:
+            self._safe_after(
+                self._on_auto_search_strategy_complete, record_id, None, str(exc)
+            )
+
+    def _on_auto_search_strategy_complete(self, record_id: str, strategy, error: Optional[str]):
+        """Persist generated search strategy and move into candidate capture."""
+        record = self.job_history_manager.get_by_id(record_id)
+        if record is None:
+            messagebox.showwarning("提示", "搜索策略生成后未找到岗位记录")
+            return
+        if strategy is None:
+            strategy = self.search_strategy_service.build_from_analysis_result(
+                "{}\n{}".format(record.result or "", record.jd_text or "")
+            )
+            self._set_status("搜索关键词 API 生成失败，已使用本地保底策略继续自动流程")
+        else:
+            self._set_status("搜索关键词已生成，准备进入候选人抓取")
+        if error:
+            self._set_status("搜索关键词 API 生成失败，已使用本地保底策略继续自动流程：{}".format(error))
+
+        strategy_payload = self.search_strategy_service.to_payload(strategy)
+        record.search_strategy_json = json.dumps(strategy_payload, ensure_ascii=False)
+        record.search_strategy_confirmed = True
+        self.job_history_manager.repository.upsert(record)
+        self._update_search_strategy_job_list(selected_record=record)
+        self._update_candidate_job_list(selected_record=record)
         self.after(500, lambda: self._continue_to_candidate_capture(record))
 
     def _continue_to_candidate_capture(self, record):
@@ -1016,6 +1191,7 @@ class MainWindow(ctk.CTk):
 
         self._update_candidate_job_list(selected_record=target_record)
         self._update_match_criteria_job_list(selected_record=target_record)
+        self._update_search_strategy_job_list(selected_record=target_record)
         self.tabview.set("候选人抓取")
         self._set_status("已将岗位分析同步到候选人抓取页")
 
@@ -1028,6 +1204,7 @@ class MainWindow(ctk.CTk):
 
         self._update_candidate_job_list(selected_record=target_record)
         self._update_match_criteria_job_list(selected_record=target_record)
+        self._update_search_strategy_job_list(selected_record=target_record)
         self._update_batch_job_list(selected_record=target_record)
         self._continue_to_candidate_capture(target_record)
 
@@ -1049,6 +1226,7 @@ class MainWindow(ctk.CTk):
             )
             self._update_resume_job_list()
             self._update_match_criteria_job_list(selected_record=target_record)
+            self._update_search_strategy_job_list(selected_record=target_record)
         return target_record
 
     def _on_run_candidate_task(
@@ -1661,6 +1839,29 @@ class MainWindow(ctk.CTk):
                         self.match_criteria_widget.set_selected_job(label)
                         break
 
+    def _update_search_strategy_job_list(self, selected_record=None):
+        """更新独立搜索关键词页的岗位来源列表。"""
+        records = self.job_history_manager.get_all()
+        if not records:
+            if hasattr(self, "search_strategy_widget"):
+                self.search_strategy_widget.update_job_options(["请先分析岗位"], {})
+            return
+
+        job_options = []
+        job_data_map = {}
+        for index, record in enumerate(records[: self.MAX_JOB_OPTIONS]):
+            label = self._make_job_option_label(record, index)
+            job_options.append(label)
+            job_data_map[label] = self._build_candidate_job_payload(record)
+
+        if hasattr(self, "search_strategy_widget"):
+            self.search_strategy_widget.update_job_options(job_options, job_data_map)
+            if selected_record is not None:
+                for label, payload in job_data_map.items():
+                    if payload.get("record_id") == selected_record.id:
+                        self.search_strategy_widget.set_selected_job(label)
+                        break
+
     def _update_batch_job_list(self, selected_record=None):
         """更新批量匹配页的岗位列表。"""
         records = self.job_history_manager.get_all()
@@ -1765,6 +1966,12 @@ class MainWindow(ctk.CTk):
                 list(candidate_map.keys()), candidate_map
             )
             self.match_criteria_widget.set_selected_job(label)
+
+        if hasattr(self, "search_strategy_widget"):
+            self.search_strategy_widget.update_job_options(
+                list(candidate_map.keys()), candidate_map
+            )
+            self.search_strategy_widget.set_selected_job(label)
 
         if hasattr(self, "batch_match_widget"):
             self.batch_match_widget.update_job_options(

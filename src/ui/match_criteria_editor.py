@@ -36,7 +36,7 @@ class _CriterionRow(ctk.CTkFrame):
 
         self.text_entry = ctk.CTkEntry(
             self,
-            placeholder_text="输入要求描述",
+            placeholder_text="输入关键词，多个词用 / 分隔",
             corner_radius=12,
             height=32,
         )
@@ -82,7 +82,7 @@ class _CriterionRow(ctk.CTkFrame):
         if show_upgrade:
             self.upgrade_btn = ctk.CTkButton(
                 self,
-                text="设为硬门槛",
+                text="设为排除词",
                 width=80,
                 height=26,
                 corner_radius=10,
@@ -183,7 +183,7 @@ class MatchCriteriaEditor(ctk.CTkFrame):
 
         ctk.CTkLabel(
             header,
-            text="匹配标准编辑器",
+            text="关键词匹配规则编辑器",
             font=ctk.CTkFont(size=14, weight="bold"),
             text_color=self._colors["text"],
         ).pack(side="left")
@@ -193,7 +193,7 @@ class MatchCriteriaEditor(ctk.CTkFrame):
 
         self.save_btn = ctk.CTkButton(
             btn_frame,
-            text="保存并用于后续批量匹配",
+            text="保存并用于后续关键词匹配",
             width=160,
             height=28,
             corner_radius=12,
@@ -229,16 +229,16 @@ class MatchCriteriaEditor(ctk.CTkFrame):
         container._parent_frame.configure(fg_color="transparent")
 
         self.dealbreaker_frame = self._create_section(
-            container, "一票否决项", self._add_dealbreaker
+            container, "排除词 / 负向方向", self._add_dealbreaker
         )
         self.core_frame = self._create_section(
-            container, "核心要求", self._add_core
+            container, "核心命中词", self._add_core
         )
         self.basic_frame = self._create_section(
-            container, "基础要求", self._add_basic
+            container, "相邻相关词", self._add_basic
         )
         self.bonus_frame = self._create_section(
-            container, "加分项", self._add_bonus
+            container, "泛能力 / 职位参考词", self._add_bonus
         )
 
         # Misjudgment reminders
@@ -248,7 +248,7 @@ class MatchCriteriaEditor(ctk.CTkFrame):
         reminders_card.pack(fill="x", pady=6, padx=2)
         ctk.CTkLabel(
             reminders_card,
-            text="常见误判提醒",
+            text="判断提醒",
             font=ctk.CTkFont(size=12, weight="bold"),
             text_color=self._colors["text"],
         ).pack(anchor="w", padx=10, pady=(8, 4))
@@ -447,12 +447,12 @@ class MatchCriteriaEditor(ctk.CTkFrame):
         active_core = [r.item for r in self._core_rows if r.item.enabled]
         if active_core:
             self.footer_label.configure(
-                text=f"当前启用的核心要求：{len(active_core)} 条 ✅",
+                text=f"当前启用的核心命中词：{len(active_core)} 条",
                 text_color="#52c41a",
             )
         else:
             self.footer_label.configure(
-                text="至少要有 1 条启用的核心要求",
+                text="至少要有 1 条启用的核心命中词",
                 text_color="#ff4d4f",
             )
 
@@ -465,7 +465,7 @@ class MatchCriteriaEditor(ctk.CTkFrame):
             return
         if self.on_save:
             self.on_save(self._criteria)
-        messagebox.showinfo("成功", "匹配标准已保存，后续批量匹配将使用此版本")
+        messagebox.showinfo("成功", "关键词匹配规则已保存，后续批量匹配将使用此版本")
 
     def _on_reset_click(self):
         if self._default_criteria is not None:

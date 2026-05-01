@@ -65,8 +65,8 @@ class BatchMatchService:
     RISKS_TEXT_PATTERN = re.compile(
         r"(?:明确短板|明显短板|关键风险|风险提示)[:：]\s*(.+)"
     )
-    TIER_TEXT_PATTERN = re.compile(r"档位判定[：:]\s*([SABC])")
-    CORE_MET_TEXT_PATTERN = re.compile(r"核心要求符合数[：:]\s*(\d+)\s*/\s*(\d+)")
+    TIER_TEXT_PATTERN = re.compile(r"档位判定[：:]\s*([ABCD])")
+    CORE_MET_TEXT_PATTERN = re.compile(r"(?:核心要求符合数|核心命中数)[：:]\s*(\d+)\s*/\s*(\d+)")
     PRE_CODE_PATTERN = re.compile(r"<(?:pre|code)[^>]*>(.*?)</(?:pre|code)>", re.DOTALL | re.IGNORECASE)
 
     def create_job(
@@ -241,7 +241,10 @@ class BatchMatchService:
     ) -> str:
         """Ask the model for structured output using MatchCriteria when available."""
         if match_criteria is not None:
-            rendered = self._render_criteria(match_criteria)
+            rendered = "{}\n\n{}".format(
+                self._render_criteria(match_criteria),
+                self._render_keyword_prescan(match_criteria, resume),
+            )
             return BATCH_MATCH_PROMPT.format(
                 rendered_criteria=rendered,
                 resume=resume,
@@ -261,8 +264,8 @@ class BatchMatchService:
                 "建议动作：<一句话>\n"
                 "一句话结论：<一句话>\n"
                 "关键风险：<一句话>\n"
-                "档位判定：<S/A/B/C 之一>\n"
-                "核心要求符合数：<数字>/<数字>\n"
+                "档位判定：<A/B/C/D 之一>\n"
+                "核心命中数：<数字>/<数字>\n"
                 "详细分析：<多行纯文本分析>"
                 "严禁输出 HTML、Markdown 代码块、表格或任何富文本标签。"
                 "如果某项信息不足，也必须保留字段名并给出简短说明。"
@@ -274,7 +277,7 @@ class BatchMatchService:
         """Render MatchCriteria into a human-readable text block for the prompt."""
         lines: List[str] = []
 
-        lines.append("<一票否决项>")
+        lines.append("<排除词 / 负向方向>")
         if match_criteria.dealbreakers:
             for item in match_criteria.dealbreakers:
                 flag = "启用" if item.enabled else "禁用"
@@ -282,7 +285,7 @@ class BatchMatchService:
         else:
             lines.append("- 无")
 
-        lines.append("\n<核心要求>")
+        lines.append("\n<核心命中词>")
         active_core = [c for c in match_criteria.core_requirements if c.enabled]
         if active_core:
             for item in active_core:
@@ -290,14 +293,14 @@ class BatchMatchService:
         else:
             lines.append("- 无")
 
-        lines.append("\n<基础要求>")
+        lines.append("\n<相邻相关词>")
         if match_criteria.basic_requirements:
             for item in match_criteria.basic_requirements:
                 lines.append(f"- {item.text}")
         else:
             lines.append("- 无")
 
-        lines.append("\n<加分项>")
+        lines.append("\n<泛能力/职位参考词>")
         if match_criteria.bonuses:
             for item in match_criteria.bonuses:
                 lines.append(f"- {item.text}")
@@ -313,6 +316,38 @@ class BatchMatchService:
 
         return "\n".join(lines)
 
+    @classmethod
+    def _render_keyword_prescan(cls, match_criteria: MatchCriteria, resume: str) -> str:
+        """Render deterministic keyword hits as a hint for the LLM."""
+        resume = resume or ""
+        sections = [
+            ("排除词命中", match_criteria.dealbreakers),
+            ("核心命中词命中", match_criteria.core_requirements),
+            ("相邻相关词命中", match_criteria.basic_requirements),
+            ("泛能力/职位参考词命中", match_criteria.bonuses),
+        ]
+        lines = ["<系统预扫描命中 - 仅供参考，最终仍需结合上下文判断>"]
+        for title, items in sections:
+            hits = []
+            for item in items or []:
+                if not item.enabled:
+                    continue
+                for keyword in cls._split_keyword_item(item.text):
+                    if keyword and keyword in resume and keyword not in hits:
+                        hits.append(keyword)
+            lines.append("- {}：{}".format(title, " / ".join(hits) if hits else "未发现"))
+        return "\n".join(lines)
+
+    @staticmethod
+    def _split_keyword_item(text: str) -> List[str]:
+        parts = re.split(r"[/／、,，;；\s]+", text or "")
+        result = []
+        for part in parts:
+            value = part.strip(" ：:()（）[]【】")
+            if len(value) >= 2 and value not in result:
+                result.append(value)
+        return result
+
     @staticmethod
     def _strip_legacy_score_lines(text: str) -> str:
         """Remove legacy total-score/tier lines that the LLM may still emit."""
@@ -323,13 +358,13 @@ class BatchMatchService:
             flags=re.MULTILINE,
         )
         text = re.sub(
-            r"^[ \t]*档位判定[：:]?\s*[SABC].*?\n",
+            r"^[ \t]*档位判定[：:]?\s*[ABCD].*?\n",
             "",
             text,
             flags=re.MULTILINE,
         )
         text = re.sub(
-            r"^[ \t]*核心要求符合数[：:]?\s*\d+\s*/\s*\d+.*?\n",
+            r"^[ \t]*(?:核心要求符合数|核心命中数)[：:]?\s*\d+\s*/\s*\d+.*?\n",
             "",
             text,
             flags=re.MULTILINE,
@@ -341,7 +376,7 @@ class BatchMatchService:
         if value is None:
             return None
         text = str(value).strip().upper()
-        if text in ("S", "A", "B", "C"):
+        if text in ("A", "B", "C", "D"):
             return text
         return None
 
@@ -384,7 +419,7 @@ class BatchMatchService:
             "tier": tier,
             "core_met_count": core_met_count,
             "core_total": core_total,
-            "dealbreaker_hit": tier == "C" if tier else False,
+            "dealbreaker_hit": tier in ("C", "D") if tier else False,
             "recommendation": recommendation,
             "summary": summary,
             "risks": risks,

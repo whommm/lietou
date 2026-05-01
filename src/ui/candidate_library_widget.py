@@ -92,7 +92,6 @@ class AutoGrabConfirmDialog(ctk.CTkToplevel):
         self.round_box = ctk.CTkTextbox(self, height=150, wrap="word")
         self.round_box.grid(row=4, column=0, padx=22, pady=(0, 14), sticky="ew")
         self.round_box.insert("1.0", self._build_round_text())
-        self.round_box.configure(state="disabled")
 
         row = ctk.CTkFrame(self, fg_color="transparent")
         row.grid(row=5, column=0, padx=22, pady=(0, 8), sticky="ew")
@@ -128,7 +127,6 @@ class AutoGrabConfirmDialog(ctk.CTkToplevel):
         self.filter_box.configure(state="normal")
         self.filter_box.delete("1.0", "end")
         self.filter_box.insert("1.0", self._build_filter_text(self.filters))
-        self.filter_box.configure(state="disabled")
 
     @staticmethod
     def _build_filter_text(filters: Dict[str, object]) -> str:
@@ -141,6 +139,7 @@ class AutoGrabConfirmDialog(ctk.CTkToplevel):
                 "工作年限：{}".format(filters.get("工作年限") or "不限"),
                 "教育经历：{}".format(filters.get("教育经历") or "不限"),
                 "性别：{}".format(filters.get("性别") or "不限"),
+                "活跃度：{}".format(filters.get("活跃度") or "不限"),
             ]
         )
 
@@ -168,6 +167,8 @@ class AutoGrabConfirmDialog(ctk.CTkToplevel):
 
     def _confirm(self):
         self._closed = True
+        self.filters = self._parse_filter_text(self.filter_box.get("1.0", "end"))
+        self._apply_edited_rounds()
         self.result = dict(self.filters)
         self.destroy()
 
@@ -175,6 +176,87 @@ class AutoGrabConfirmDialog(ctk.CTkToplevel):
         self._closed = True
         self.result = None
         self.destroy()
+
+    @staticmethod
+    def _parse_filter_text(text: str) -> Dict[str, object]:
+        filters: Dict[str, object] = {}
+        for raw_line in (text or "").splitlines():
+            line = raw_line.strip()
+            if not line or "：" not in line:
+                continue
+            key, value = [part.strip() for part in line.split("：", 1)]
+            if key == "城市":
+                cities = [
+                    city.strip()
+                    for city in value.replace(",", "、").replace("，", "、").split("、")
+                    if city.strip() and city.strip() != "全国"
+                ]
+                if cities:
+                    filters["目前城市"] = cities[:4]
+            elif key == "工作年限" and value and value != "不限":
+                filters["工作年限"] = value
+            elif key == "教育经历" and value and value != "不限":
+                filters["教育经历"] = value
+            elif key == "性别" and value and value != "不限":
+                filters["性别"] = value
+            elif key == "性别" and value == "不限":
+                filters["性别"] = value
+            elif key == "活跃度" and value and value != "不限":
+                filters["活跃度"] = value
+        return filters
+
+    def _apply_edited_rounds(self) -> None:
+        strategy = self.payload.get("strategy", {}) if isinstance(self.payload, dict) else {}
+        if not isinstance(strategy, dict):
+            return
+        original_rounds = strategy.get("executable_rounds", [])
+        parsed_rounds = self._parse_round_text(
+            self.round_box.get("1.0", "end"),
+            original_rounds if isinstance(original_rounds, list) else [],
+        )
+        if parsed_rounds:
+            strategy["executable_rounds"] = parsed_rounds
+
+    @staticmethod
+    def _parse_round_text(text: str, original_rounds: List[Dict[str, object]]) -> List[Dict[str, object]]:
+        import re
+
+        original_by_index = {
+            index: dict(item)
+            for index, item in enumerate(original_rounds or [], start=1)
+            if isinstance(item, dict)
+        }
+        parsed = []
+        seen = set()
+        for raw_line in (text or "").splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            if line.startswith("搜索计划") or line.startswith("执行策略") or line.startswith("暂无"):
+                continue
+            match = re.match(r"^(?:-?\s*)?第\s*(\d+)\s*轮(?:[^:：]*)[:：]\s*(.+)$", line)
+            if match:
+                index = int(match.group(1))
+                query = match.group(2).strip()
+            else:
+                match = re.match(r"^(?:-?\s*)?([^:：]+)[:：]\s*(.+)$", line)
+                index = len(parsed) + 1
+                query = match.group(2).strip() if match else line
+            if not query or query in seen:
+                continue
+            seen.add(query)
+            base = original_by_index.get(index, {})
+            base.update(
+                {
+                    "label": base.get("label") or "第{}轮搜索".format(index),
+                    "query": query,
+                    "priority": base.get("priority") or index,
+                    "match_mode": base.get("match_mode") or "all",
+                    "scope": base.get("scope") or "全部经历",
+                }
+            )
+            parsed.append(base)
+        return parsed
 
 
 class CandidateLibraryWidget(ctk.CTkFrame):
@@ -319,15 +401,18 @@ class CandidateLibraryWidget(ctk.CTkFrame):
 
     def _build_control_panel(self):
         colors = self.PALETTE
-        frame = ctk.CTkFrame(
+        frame = ctk.CTkScrollableFrame(
             self,
             corner_radius=24,
             fg_color=colors["panel"],
             border_width=1,
             border_color=colors["border"],
+            scrollbar_button_color=colors["accent"],
+            scrollbar_button_hover_color=colors["accent_hover"],
         )
         frame.grid(row=1, column=0, padx=(10, 6), pady=(0, 10), sticky="nsew")
         frame.grid_columnconfigure(0, weight=1)
+        frame.grid_rowconfigure(6, weight=1)
 
         ctk.CTkLabel(
             frame,
@@ -451,7 +536,7 @@ class CandidateLibraryWidget(ctk.CTkFrame):
 
         self.plan_box = ctk.CTkTextbox(
             frame,
-            height=170,
+            height=220,
             wrap="word",
             corner_radius=18,
             border_width=1,
@@ -461,7 +546,7 @@ class CandidateLibraryWidget(ctk.CTkFrame):
             scrollbar_button_color=colors["accent"],
             scrollbar_button_hover_color=colors["accent_hover"],
         )
-        self.plan_box.grid(row=6, column=0, padx=16, pady=(0, 16), sticky="ew")
+        self.plan_box.grid(row=6, column=0, padx=16, pady=(0, 18), sticky="nsew")
         self.plan_box.insert("1.0", "选择岗位后显示抓取计划。")
 
 
@@ -755,13 +840,16 @@ class CandidateLibraryWidget(ctk.CTkFrame):
         lines.append("- 工作年限：{}".format(filters.get("工作年限") or "不限"))
         lines.append("- 教育经历：{}".format(filters.get("教育经历") or "不限"))
         lines.append("- 性别：{}".format(filters.get("性别") or "不限"))
+        lines.append("- 活跃度：{}".format(filters.get("活跃度") or "不限"))
         if rounds:
             lines.append("搜索轮次（{} 条）：每轮最多30人".format(len(rounds)))
             for item in rounds[:4]:
                 label = item.get("label") or "搜索"
                 query = item.get("query") or ""
                 if query:
-                    lines.append("- {}: {}".format(label, query))
+                    position_filter = item.get("position_filter") or ""
+                    suffix = "；职位栏：{}".format(position_filter) if position_filter else ""
+                    lines.append("- {}: 搜索栏：{}{}".format(label, query, suffix))
         else:
             precise = strategy.get("precise_keywords", []) if isinstance(strategy, dict) else []
             if precise:

@@ -25,6 +25,7 @@ from .liepin_search_task_service import (
     SearchTaskExecutionSummary,
 )
 from .search_strategy_service import SearchStrategy, SearchStrategyService
+from .search_strategy_generation_service import SearchStrategyGenerationService
 from .search_task_repository import SearchTaskRepository
 
 __all__ = [
@@ -44,6 +45,7 @@ __all__ = [
     "LiepinSearchTaskService",
     "PlaywrightNotInstalledError",
     "SearchStrategy",
+    "SearchStrategyGenerationService",
     "SearchStrategyService",
     "SearchTaskExecutionSummary",
     "SearchTaskRepository",

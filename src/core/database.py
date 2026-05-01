@@ -126,6 +126,14 @@ class DatabaseManager:
                 connection.execute(
                     "ALTER TABLE analysis_history ADD COLUMN match_criteria_confirmed BOOLEAN DEFAULT 0"
                 )
+            if "search_strategy_json" not in columns:
+                connection.execute(
+                    "ALTER TABLE analysis_history ADD COLUMN search_strategy_json TEXT"
+                )
+            if "search_strategy_confirmed" not in columns:
+                connection.execute(
+                    "ALTER TABLE analysis_history ADD COLUMN search_strategy_confirmed BOOLEAN DEFAULT 0"
+                )
 
             task_columns = {
                 row["name"]

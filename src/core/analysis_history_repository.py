@@ -27,6 +27,8 @@ class AnalysisHistoryRepository:
             record_type=row["record_type"],
             match_criteria_json=row["match_criteria_json"] or "",
             match_criteria_confirmed=bool(row["match_criteria_confirmed"]),
+            search_strategy_json=row["search_strategy_json"] or "",
+            search_strategy_confirmed=bool(row["search_strategy_confirmed"]),
         )
 
     def upsert(self, record):
@@ -39,7 +41,8 @@ class AnalysisHistoryRepository:
                     """
                     UPDATE analysis_history
                     SET title = ?, jd_text = ?, result = ?, created_at = ?, record_type = ?,
-                        match_criteria_json = ?, match_criteria_confirmed = ?
+                        match_criteria_json = ?, match_criteria_confirmed = ?,
+                        search_strategy_json = ?, search_strategy_confirmed = ?
                     WHERE id = ?
                     """,
                     (
@@ -50,6 +53,8 @@ class AnalysisHistoryRepository:
                         record.record_type,
                         record.match_criteria_json,
                         1 if record.match_criteria_confirmed else 0,
+                        record.search_strategy_json,
+                        1 if record.search_strategy_confirmed else 0,
                         record.id,
                     ),
                 )
@@ -58,8 +63,9 @@ class AnalysisHistoryRepository:
                     """
                     INSERT INTO analysis_history (
                         id, title, jd_text, result, created_at, record_type,
-                        match_criteria_json, match_criteria_confirmed
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        match_criteria_json, match_criteria_confirmed,
+                        search_strategy_json, search_strategy_confirmed
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         record.id,
@@ -70,6 +76,8 @@ class AnalysisHistoryRepository:
                         record.record_type,
                         record.match_criteria_json,
                         1 if record.match_criteria_confirmed else 0,
+                        record.search_strategy_json,
+                        1 if record.search_strategy_confirmed else 0,
                     ),
                 )
         return record

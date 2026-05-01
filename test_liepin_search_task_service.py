@@ -92,6 +92,16 @@ class FakeFilterSearchService(FakeSearchService):
         return super().search(keyword)
 
 
+class FakeControlSearchService(FakeSearchService):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.search_control_calls = []
+
+    def search(self, keyword, filters=None, match_mode="", scope="", position_filter=""):
+        self.search_control_calls.append((keyword, filters, match_mode, scope, position_filter))
+        return super().search(keyword)
+
+
 class FakeResumeExtractor:
     def __init__(self, broken_urls=None):
         self.broken_urls = set(broken_urls or [])
@@ -420,6 +430,45 @@ def test_run_task_applies_filters_limits_each_round_and_callbacks(tmp_path):
         "结构 照明",
         "结构 照明",
     ]
+
+
+def test_run_task_passes_round_match_mode_and_scope(tmp_path):
+    search_service = FakeControlSearchService(
+        query_sequences={
+            "算法 OR 推荐": [[LiepinSearchCandidate(name="张三", profile_url="https://example.com/resume/1")]],
+        }
+    )
+    task_repository, excel_service, service = build_service(tmp_path, search_service)
+    task = task_repository.create(
+        job_history_id="job_007",
+        task_name="模式范围搜索",
+        keywords={
+            "filters": {"目前城市": ["深圳"]},
+            "executable_rounds": [
+                {
+                    "query": "算法 OR 推荐",
+                    "label": "测绘",
+                    "priority": 1,
+                    "match_mode": "any",
+                    "scope": "目前职位",
+                    "position_filter": "产品",
+                    "intent": "先测绘",
+                }
+            ],
+        },
+        max_pages=1,
+        max_candidates=1,
+    )
+
+    summary = service.run_task(task.id)
+
+    assert summary.sourced_candidate_count == 1
+    assert search_service.search_control_calls == [
+        ("算法 OR 推荐", {"目前城市": ["深圳"]}, "any", "目前职位", "产品")
+    ]
+    assert summary.executed_rounds[0]["match_mode"] == "any"
+    assert summary.query_level_stats[0]["scope"] == "目前职位"
+    assert summary.query_level_stats[0]["position_filter"] == "产品"
 
 
 def test_run_task_skips_empty_round_and_continues_next_query(tmp_path):

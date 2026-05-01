@@ -174,6 +174,12 @@ class LiepinSearchService:
             container_selector="div.ant-select.ant-select-lg.h-select.sexSelectStyle.gray.ant-select-single.ant-select-show-arrow",
             title_text="性 别：",
         ),
+        "活跃度": LiepinFilterFieldSpec(
+            title="活跃度",
+            field_type="dropdown",
+            container_selector="div.search-item:has-text('活跃度') div.ant-select",
+            title_text="活跃度：",
+        ),
     }
 
     def __init__(self, browser_manager: LiepinBrowserManager):
@@ -212,7 +218,12 @@ class LiepinSearchService:
         return self.browser_manager.get_state()
 
     def search(
-        self, keyword: str, filters: Optional[Dict[str, object]] = None
+        self,
+        keyword: str,
+        filters: Optional[Dict[str, object]] = None,
+        match_mode: str = "",
+        scope: str = "",
+        position_filter: str = "",
     ) -> List[LiepinSearchCandidate]:
         """Run a keyword search, apply optional filters, and return first page summaries."""
         if not keyword.strip():
@@ -221,7 +232,16 @@ class LiepinSearchService:
         self.open_search_page()
 
         def _run(page):
-            self._execute_search(page, keyword.strip())
+            try:
+                self._execute_search(
+                    page,
+                    keyword.strip(),
+                    match_mode=match_mode,
+                    scope=scope,
+                    position_filter=position_filter,
+                )
+            except TypeError:
+                self._execute_search(page, keyword.strip())
             if filters:
                 self._apply_filters_on_page(page, filters)
             return self.extract_candidates_from_page(page)
@@ -255,10 +275,44 @@ class LiepinSearchService:
             return
         for title, value in normalized_filters.items():
             try:
-                self._apply_one_filter(page, title, value)
-            except LiepinSearchPageChangedError as exc:
+                self._apply_filter_with_retries(page, title, value)
+            except Exception as exc:
                 logger.warning("skip filter apply: %s=%s reason=%s", title, value, exc)
                 self._dismiss_any_open_modal(page)
+
+    def _apply_filter_with_retries(
+        self, page: Page, title: str, value: object, attempts: int = 2
+    ) -> None:
+        """Apply one filter defensively because Liepin controls are animation-heavy."""
+        last_exc = None
+        spec = self.FILTER_FIELD_SPECS.get(title)
+        max_attempts = max(1, attempts)
+        if not spec or spec.field_type not in ("city_modal", "dropdown"):
+            max_attempts = 1
+        for attempt in range(max_attempts):
+            try:
+                self._dismiss_any_open_modal(page)
+                self._apply_one_filter(page, title, value)
+                self._dismiss_any_open_modal(page)
+                return
+            except Exception as exc:
+                last_exc = exc
+                logger.warning(
+                    "filter apply attempt failed: %s=%s attempt=%s/%s reason=%s",
+                    title,
+                    value,
+                    attempt + 1,
+                    max_attempts,
+                    exc,
+                )
+                self._dismiss_any_open_modal(page)
+                try:
+                    page.keyboard.press("Escape")
+                    page.wait_for_timeout(300)
+                except Exception:
+                    pass
+        if last_exc:
+            raise last_exc
 
     def extract_current_page_candidates(self) -> List[LiepinSearchCandidate]:
         """Parse candidate summaries from the current page without searching."""
@@ -383,19 +437,126 @@ class LiepinSearchService:
                 continue
         logger.warning("_soft_wait_for_results: no result cards visible, proceeding anyway")
 
-    def _execute_search(self, page: Page, keyword: str) -> None:
+    def _execute_search(
+        self,
+        page: Page,
+        keyword: str,
+        match_mode: str = "",
+        scope: str = "",
+        position_filter: str = "",
+    ) -> None:
         """Fill the most likely search field and submit the search.
 
         The live page contains more than one `.search-component-input`, so this
         method tries visible editable candidates one by one and only accepts a
         candidate when the page actually reaches the result state.
         """
+        self._apply_search_execution_options(page, match_mode=match_mode, scope=scope)
         controls = self._detect_search_controls(page)
         if controls.search_input is None:
             raise LiepinSearchPageChangedError("未找到猎聘搜索输入框，请检查页面结构")
         self._write_keyword(controls.search_input, keyword)
+        if position_filter:
+            self._apply_position_name_filter(page, position_filter)
         self._submit_search(page, controls)
         self._wait_for_results(page)
+
+    def _apply_position_name_filter(self, page: Page, position_filter: str) -> None:
+        """Fill Liepin's 职位名称 field as a lightweight title filter."""
+        value = (position_filter or "").strip()
+        if not value:
+            return
+        input_locator = self._find_position_name_input(page)
+        if input_locator is None:
+            logger.warning("position filter skipped: position input not found value=%s", value)
+            return
+        try:
+            self._write_keyword(input_locator, value)
+            try:
+                input_locator.press("Enter")
+            except Exception:
+                pass
+            confirm = self._find_position_name_confirm_button(page)
+            if confirm is not None:
+                confirm.click(timeout=3000)
+                try:
+                    page.wait_for_timeout(300)
+                except Exception:
+                    pass
+        except Exception as exc:
+            logger.warning("position filter skipped: value=%s reason=%s", value, exc)
+
+    def _find_position_name_input(self, page: Page):
+        selectors = [
+            "xpath=//*[contains(normalize-space(.), '职位名称')]/following::input[contains(@class,'ant-select-selection-search-input')][1]",
+            "xpath=//*[contains(normalize-space(.), '当前职位')]/following::input[contains(@class,'search-component-input') or contains(@class,'ant-select-selection-search-input')][1]",
+            "xpath=//*[contains(normalize-space(.), '当前职位')]/following::input[not(@readonly)][1]",
+        ]
+        for selector in selectors:
+            try:
+                locator = page.locator(selector).first
+                if locator.is_visible(timeout=800):
+                    return locator
+            except Exception:
+                continue
+        return None
+
+    def _find_position_name_confirm_button(self, page: Page):
+        selectors = [
+            "xpath=//*[contains(normalize-space(.), '职位名称')]/following::button[.//span[contains(normalize-space(.),'确 定')]][1]",
+            "xpath=//*[contains(normalize-space(.), '当前职位')]/following::button[.//span[contains(normalize-space(.),'确 定')]][1]",
+        ]
+        for selector in selectors:
+            try:
+                locator = page.locator(selector).first
+                if locator.is_visible(timeout=800):
+                    return locator
+            except Exception:
+                continue
+        return None
+
+    def _apply_search_execution_options(self, page: Page, match_mode: str = "", scope: str = "") -> None:
+        """Best-effort apply per-round keyword mode and resume scope controls."""
+        mode_texts = {
+            "all": ["全部关键词", "包含全部关键词"],
+            "any": ["任意关键词", "包含任意关键词"],
+        }.get((match_mode or "").strip().lower(), [])
+        for text in mode_texts:
+            if self._click_text_control(page, text):
+                break
+
+        normalized_scope = (scope or "").strip()
+        scope_aliases = {
+            "全部经历": ["全部经历", "全部职位"],
+            "全部职位": ["全部职位", "全部经历"],
+            "目前职位": ["目前职位", "目前公司"],
+            "目前公司": ["目前公司", "目前职位"],
+            "过往职位": ["过往职位", "过往公司"],
+            "过往公司": ["过往公司", "过往职位"],
+        }
+        for text in scope_aliases.get(normalized_scope, [normalized_scope] if normalized_scope else []):
+            if self._click_text_control(page, text):
+                break
+
+    @staticmethod
+    def _click_text_control(page: Page, text: str) -> bool:
+        if not text:
+            return False
+        selectors = [
+            'label:has-text("{}")'.format(text),
+            'button:has-text("{}")'.format(text),
+            'span:has-text("{}")'.format(text),
+        ]
+        for selector in selectors:
+            try:
+                locator = page.locator(selector).first
+                if locator.is_visible(timeout=500):
+                    locator.click(timeout=1500)
+                    page.wait_for_timeout(150)
+                    return True
+            except Exception:
+                continue
+        return False
 
     # Regex patterns for structured field extraction from result-card text
     _AGE_PATTERN = re.compile(r"(\d+岁)")
@@ -556,6 +717,8 @@ class LiepinSearchService:
         logger.warning("extract_candidates_from_page: url=%s selector=%s cards=%s", url, matched_selector or "none", len(cards))
 
         if not cards:
+            if self._page_looks_empty(page):
+                raise LiepinSearchNoResultsError("当前关键词未搜索到候选人，准备尝试下一组关键词")
             logger.warning("extract_candidates_from_page: No cards found via selectors, trying DOM fallback")
             return self._extract_candidates_with_dom_fallback(page)
 
@@ -790,6 +953,8 @@ class LiepinSearchService:
             logger.warning("DOM fallback candidate %s: name=%s href=%s", i + 1, c.name, c.profile_url or "(none)")
         if candidates:
             return candidates
+        if self._page_looks_empty(page):
+            raise LiepinSearchNoResultsError("当前关键词未搜索到候选人，准备尝试下一组关键词")
         raise LiepinSearchPageChangedError("未找到候选人结果卡片")
 
     @staticmethod
@@ -1064,6 +1229,8 @@ class LiepinSearchService:
     def _page_looks_empty(page: Page) -> bool:
         empty_markers = (
             "没找到相关匹配项",
+            "没有找到符合条件的简历",
+            "没有找到符合条件",
             "暂无相关人选",
             "暂无匹配结果",
             "未找到相关匹配项",
@@ -1616,6 +1783,8 @@ class LiepinSearchService:
         if not container.is_visible(timeout=3000):
             raise LiepinSearchPageChangedError("未找到下拉筛选控件: {}".format(spec.title))
         input_locator = container.locator("input.ant-select-selection-search-input").first
+        normalized_value = self._normalize_dropdown_filter_value(spec, value)
+        self._dismiss_any_open_modal(page)
         self._focus_dropdown_input(container, input_locator)
         try:
             input_locator.press("ArrowDown")
@@ -1624,10 +1793,31 @@ class LiepinSearchService:
         page.wait_for_timeout(200)
         try:
             options = self._open_dropdown_options(page)
-            self._select_dropdown_option(options, value)
+            self._select_dropdown_option(options, normalized_value)
         except Exception:
-            self._select_dropdown_option_by_keyboard(page, value)
-        self._wait_for_filter_apply(page, expected_text=value)
+            self._select_dropdown_option_by_keyboard(page, normalized_value)
+        self._wait_for_filter_apply(page, expected_text=normalized_value)
+
+    @staticmethod
+    def _normalize_dropdown_filter_value(spec: LiepinFilterFieldSpec, value: str) -> str:
+        normalized = (value or "").strip()
+        if spec.title == "活跃度":
+            if "周" in normalized or "7" in normalized:
+                return "近一周"
+            if "月" in normalized or "30" in normalized:
+                return "近一月"
+            if "不限" in normalized:
+                return "不限"
+            return normalized
+        if spec.title != "性别":
+            return normalized
+        if "男" in normalized:
+            return "男"
+        if "女" in normalized:
+            return "女"
+        if "不限" in normalized:
+            return "不限"
+        return normalized
 
     @staticmethod
     def _focus_dropdown_input(container, input_locator) -> None:
@@ -1660,8 +1850,7 @@ class LiepinSearchService:
         if not trigger.is_visible(timeout=3000):
             raise LiepinSearchPageChangedError("未找到城市其他入口: {}".format(spec.title))
         trigger.click(timeout=5000)
-        modal = page.locator("div.ant-modal.city-modal").first
-        modal.wait_for(state="visible", timeout=5000)
+        modal = self._resolve_city_modal(page)
         try:
             for city in cities:
                 self._select_city_in_modal(modal, city)
@@ -1669,10 +1858,10 @@ class LiepinSearchService:
             self._wait_for_enabled_locator(confirm, timeout=5000)
             confirm.click(timeout=5000)
             page.wait_for_timeout(500)
-            modal.wait_for(state="hidden", timeout=8000)
+            self._wait_for_city_modal_closed(page, modal, timeout=8000)
             page.wait_for_timeout(300)
             self._wait_for_filter_apply(page, expected_text=cities[0])
-        except LiepinSearchPageChangedError:
+        except Exception:
             self._dismiss_any_open_modal(page)
             raise
 
@@ -1691,8 +1880,7 @@ class LiepinSearchService:
         if not trigger.is_visible(timeout=3000):
             raise LiepinSearchPageChangedError("未找到城市其他入口: {}".format(spec.title))
         trigger.click(timeout=5000)
-        modal = page.locator("div.ant-modal.city-modal").first
-        modal.wait_for(state="visible", timeout=5000)
+        modal = self._resolve_city_modal(page)
 
         try:
             self._select_city_in_modal(modal, value)
@@ -1700,75 +1888,158 @@ class LiepinSearchService:
             self._wait_for_enabled_locator(confirm, timeout=5000)
             confirm.click(timeout=5000)
             page.wait_for_timeout(500)
-            modal.wait_for(state="hidden", timeout=8000)
+            self._wait_for_city_modal_closed(page, modal, timeout=8000)
             page.wait_for_timeout(300)
             self._wait_for_filter_apply(page, expected_text=value)
-        except LiepinSearchPageChangedError:
+        except Exception:
             self._dismiss_any_open_modal(page)
             raise
 
     def _dismiss_any_open_modal(self, page: Page) -> None:
         """关闭页面上可能残留的城市选择模态框/遮罩层，防止遮挡后续交互。"""
-        # 策略1: 通过 JS 强制隐藏所有模态框相关元素（最可靠，不受动画影响）
+        try:
+            modal = page.locator("div.ant-modal.city-modal, div.ant-modal-wrap.antd-fd-city-modal").first
+            is_visible = modal.is_visible(timeout=700)
+        except Exception:
+            is_visible = False
+
+        if is_visible:
+            logger.warning("检测到残留模态框，尝试关闭...")
+            for selector in (
+                'button:has-text("取消")',
+                "button.ant-modal-close",
+                "span.ant-modal-close-x",
+            ):
+                try:
+                    close_btn = modal.locator(selector).first
+                    if close_btn.is_visible(timeout=500):
+                        close_btn.click(timeout=3000)
+                        page.wait_for_timeout(300)
+                        break
+                except Exception:
+                    continue
+            try:
+                if modal.is_visible(timeout=500):
+                    page.keyboard.press("Escape")
+                    page.wait_for_timeout(500)
+            except Exception:
+                pass
+
         try:
             page.evaluate("""() => {
-                document.querySelectorAll('.ant-modal-wrap.antd-fd-city-modal, .ant-modal-mask, .ant-city-menu-list').forEach(function(el) {
-                    el.style.display = 'none';
-                    el.style.visibility = 'hidden';
-                    el.style.pointerEvents = 'none';
-                });
-                document.querySelectorAll('.ant-modal-wrap').forEach(function(el) {
-                    if (window.getComputedStyle(el).display !== 'none') {
+                document.querySelectorAll('.ant-select-dropdown').forEach(function(el) {
+                    var style = window.getComputedStyle(el);
+                    if (style.display !== 'none' && style.visibility !== 'hidden') {
                         el.style.display = 'none';
+                        el.style.pointerEvents = 'none';
+                    }
+                });
+                document.querySelectorAll('.ant-modal-wrap, .ant-modal-mask, .ant-city-menu-list').forEach(function(el) {
+                    var style = window.getComputedStyle(el);
+                    if (style.display !== 'none' && style.visibility !== 'hidden') {
+                        el.style.display = 'none';
+                        el.style.visibility = 'hidden';
+                        el.style.pointerEvents = 'none';
                     }
                 });
             }""")
         except Exception as exc:
             logger.debug("JS dismiss modal failed: %s", exc)
 
-        # 策略2: 常规关闭方式
-        try:
-            modal = page.locator("div.ant-modal.city-modal, div.ant-modal-wrap.antd-fd-city-modal").first
-            if not modal.is_visible(timeout=1500):
-                return
-        except Exception:
-            return
+    @staticmethod
+    def _first_visible_locator(owner, selectors: List[str], timeout: int = 500):
+        fallback = None
+        for selector in selectors:
+            locator = owner.locator(selector)
+            if fallback is None:
+                try:
+                    fallback = locator.first
+                except Exception:
+                    fallback = locator
+            try:
+                count = locator.count()
+            except Exception:
+                count = 0
+            if count:
+                for index in range(count):
+                    try:
+                        candidate = locator.nth(index)
+                        if candidate.is_visible(timeout=timeout):
+                            return candidate
+                    except Exception:
+                        continue
+            try:
+                candidate = locator.first
+                if candidate.is_visible(timeout=timeout):
+                    return candidate
+            except Exception:
+                continue
+        return fallback or owner.locator(selectors[0]).first
 
-        logger.warning("检测到残留模态框，尝试关闭...")
+    def _resolve_city_modal(self, page: Page):
+        selectors = [
+            "div.ant-modal.city-modal",
+            "div.ant-modal-wrap.antd-fd-city-modal div.ant-modal",
+            "div.ant-modal:has(input.ant-input)",
+            "div.ant-modal:has(.suggest-list)",
+        ]
+        modal = self._first_visible_locator(page, selectors, timeout=500)
         try:
-            cancel = modal.locator('button:has-text("取消")').first
-            if cancel.is_visible(timeout=500):
-                cancel.click(timeout=3000)
-                page.wait_for_timeout(300)
-                return
+            modal.wait_for(state="visible", timeout=5000)
+            return modal
+        except Exception as exc:
+            raise LiepinSearchPageChangedError("城市选择弹窗未打开: {}".format(exc))
+
+    def _wait_for_city_modal_closed(self, page: Page, modal, timeout: int = 8000) -> None:
+        try:
+            modal.wait_for(state="hidden", timeout=timeout)
+            return
         except Exception:
             pass
+        self._dismiss_any_open_modal(page)
         try:
-            close_btn = modal.locator("button.ant-modal-close, span.ant-modal-close-x").first
-            if close_btn.is_visible(timeout=500):
-                close_btn.click(timeout=3000)
-                page.wait_for_timeout(300)
-                return
-        except Exception:
-            pass
-        try:
-            page.keyboard.press("Escape")
-            page.wait_for_timeout(500)
+            modal.wait_for(state="hidden", timeout=1000)
         except Exception:
             pass
 
     def _select_city_in_modal(self, modal, value: str) -> None:
-        hot_city = modal.locator("span.ant-tag.ant-tag-checkable:has-text('{}')".format(value)).first
+        hot_city = self._first_visible_locator(
+            modal,
+            [
+                "span.ant-tag.ant-tag-checkable:has-text('{}')".format(value),
+                "label.tag-item:has-text('{}')".format(value),
+                "span:has-text('{}')".format(value),
+            ],
+            timeout=500,
+        )
         try:
             if hot_city.is_visible(timeout=1200):
                 hot_city.click(timeout=5000)
                 return
             raise RuntimeError("not-hot-city")
         except Exception:
-            city_input = modal.locator('input.ant-input[placeholder="搜索城市"]').first
+            city_input = self._first_visible_locator(
+                modal,
+                [
+                    'input.ant-input[placeholder="搜索城市"]',
+                    'input[placeholder*="城市"]',
+                    "input.ant-input",
+                    'input[type="text"]',
+                ],
+                timeout=500,
+            )
             city_input.click(timeout=3000)
             city_input.fill(value)
-            suggest = modal.locator("div.suggest-list > ul > li").first
+            suggest = self._first_visible_locator(
+                modal,
+                [
+                    "div.suggest-list > ul > li:has-text('{}')".format(value),
+                    "div.suggest-list > ul > li",
+                    "div.suggest-list li",
+                    "li:has-text('{}')".format(value),
+                ],
+                timeout=500,
+            )
             suggest.wait_for(state="visible", timeout=5000)
             suggest.click(timeout=5000)
 
@@ -1805,15 +2076,20 @@ class LiepinSearchService:
             return False
 
     def _open_dropdown_options(self, page: Page):
-        dropdown = page.locator("div.ant-select-dropdown.search-select").first
+        selectors = [
+            "div.ant-select-dropdown.search-select",
+            "div.ant-select-dropdown:not(.ant-select-dropdown-hidden)",
+            "div.ant-select-dropdown",
+        ]
+        dropdown = self._first_visible_locator(page, selectors, timeout=500)
         try:
             dropdown.wait_for(state="visible", timeout=1500)
-            return dropdown.locator("div.ant-select-item.ant-select-item-option")
         except Exception:
             page.keyboard.press("ArrowDown")
             page.wait_for_timeout(200)
+            dropdown = self._first_visible_locator(page, selectors, timeout=500)
             dropdown.wait_for(state="visible", timeout=3000)
-            return dropdown.locator("div.ant-select-item.ant-select-item-option")
+        return dropdown.locator("div.ant-select-item.ant-select-item-option")
 
     def _select_dropdown_option(self, options, value: str) -> None:
         count = options.count()

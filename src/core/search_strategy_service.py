@@ -74,6 +74,19 @@ class SearchStrategyService:
         search_intent = self._extract_search_intent_json(analysis_html)
         all_keywords = self._extract_unique_copy_keywords(analysis_html)
 
+        direct_section_keywords = self._extract_keywords_from_section(
+            analysis_html, ["直接关键词", "直接词"]
+        )
+        indirect_section_keywords = self._extract_keywords_from_section(
+            analysis_html, ["间接关键词", "间接词"]
+        )
+        long_tail_section_keywords = self._extract_keywords_from_section(
+            analysis_html, ["长尾关键词", "长尾词"]
+        )
+        title_variant_keywords = self._extract_keywords_from_section(
+            analysis_html, ["职称穷尽", "同一岗位的N种叫法"]
+        )
+
         precise_keywords = self._extract_keywords_from_section(
             analysis_html,
             ["第一轮精准搜索词", "精准搜索词"],
@@ -94,12 +107,22 @@ class SearchStrategyService:
             analysis_html,
             ["优先来源公司 / 团队线索"],
         )
+        if direct_section_keywords and not precise_keywords:
+            precise_keywords = direct_section_keywords
+        if indirect_section_keywords and not expansion_keywords:
+            expansion_keywords = indirect_section_keywords
+        if title_variant_keywords:
+            synonyms = self._merge_unique_lists(synonyms, title_variant_keywords)
+        if long_tail_section_keywords:
+            synonyms = self._merge_unique_lists(synonyms, long_tail_section_keywords)
+
         exclude_keywords = self._extract_free_text_points(
             analysis_html, self.FREE_TEXT_LABELS["exclude_keywords"]
         )
         boolean_queries = self._extract_free_text_points(
             analysis_html, self.FREE_TEXT_LABELS["boolean_queries"]
         )
+        progressive_rounds = self._extract_progressive_search_rounds(analysis_html)
 
         fallback_pool = [
             keyword
@@ -120,9 +143,9 @@ class SearchStrategyService:
         if scene_keywords:
             synonyms = self._merge_unique_lists(synonyms, scene_keywords)
 
-        direct_keywords = self._take_short_terms(search_intent.get("direct_keywords", []))
-        indirect_keywords = self._take_short_terms(search_intent.get("indirect_keywords", []))
-        long_tail_keywords = self._take_short_terms(search_intent.get("long_tail_keywords", []))
+        direct_keywords = self._take_short_terms(search_intent.get("direct_keywords", []) or direct_section_keywords)
+        indirect_keywords = self._take_short_terms(search_intent.get("indirect_keywords", []) or indirect_section_keywords)
+        long_tail_keywords = self._take_short_terms(search_intent.get("long_tail_keywords", []) or long_tail_section_keywords)
 
         atomic_terms = self._build_atomic_terms(
             precise_keywords=precise_keywords,
@@ -136,8 +159,10 @@ class SearchStrategyService:
             atomic_terms=atomic_terms,
             precise_keywords=precise_keywords,
             expansion_keywords=expansion_keywords,
+            synonyms=synonyms,
             boolean_queries=boolean_queries,
             search_intent=search_intent,
+            progressive_rounds=progressive_rounds,
         )
         filters = self.extract_filters_from_analysis(analysis_html)
 
@@ -196,6 +221,7 @@ class SearchStrategyService:
         gender = self._extract_gender(text)
         if gender:
             filters["性别"] = gender
+        filters["活跃度"] = "近一周"
 
         return filters
 
@@ -207,8 +233,14 @@ class SearchStrategyService:
 
     @staticmethod
     def _extract_work_years(text: str) -> str:
+        explicit = re.search(
+            r"(\d+)\s*年\s*(?:\+|以上|及以上).*?(?:管理经验|团队管理|产品研发|工作经验|经验)",
+            text,
+        )
+        if explicit:
+            return "{}年以上".format(explicit.group(1))
         patterns = [
-            (r"(\d+)\s*[-~至到]\s*(\d+)\s*年", "{}-{}年"),
+            (r"(\d+)\s*[-~至到]\s*(\d+)\s*年(?:经验|工作经验)?", "{}-{}年"),
             (r"(\d+)\s*年\s*(?:及)?以上", "{}年以上"),
             (r"(\d+)\s*年以上", "{}年以上"),
             (r"经验不限|不限经验|工作年限不限", "不限"),
@@ -218,6 +250,8 @@ class SearchStrategyService:
             if not match:
                 continue
             if "{}-{}" in template:
+                if int(match.group(1)) == 0:
+                    continue
                 return template.format(match.group(1), match.group(2))
             if "{}" in template:
                 return template.format(match.group(1))
@@ -226,6 +260,12 @@ class SearchStrategyService:
 
     @staticmethod
     def _extract_education(text: str) -> str:
+        if re.search(r"(学历不限|不限学历)", text):
+            return "不限"
+        if re.search(r"(大专|专科)\s*(及以上|以上|学历)?|统招大专", text):
+            return "大专"
+        if re.search(r"(本科)\s*(及以上|以上|学历)", text):
+            return "本科"
         if re.search(r"博士", text):
             return "博士"
         if re.search(r"硕士|研究生", text):
@@ -234,8 +274,6 @@ class SearchStrategyService:
             return "本科"
         if re.search(r"大专|专科", text):
             return "大专"
-        if re.search(r"学历不限", text):
-            return "不限"
         return ""
 
     @staticmethod
@@ -259,9 +297,37 @@ class SearchStrategyService:
         normalized = {}
         for key, value in data.items():
             if isinstance(value, list):
-                normalized[key] = [
-                    item for item in (self._normalize_keyword(part) for part in value) if item
-                ]
+                if key == "recommended_rounds":
+                    normalized[key] = self._normalize_recommended_rounds(value)
+                else:
+                    normalized[key] = [
+                        item
+                        for item in (self._normalize_keyword(part) for part in value if isinstance(part, str))
+                        if item
+                    ]
+        return normalized
+
+    def _normalize_recommended_rounds(self, rounds: List[object]) -> List[object]:
+        normalized = []
+        for item in rounds:
+            if isinstance(item, str):
+                query = self._normalize_boolean_query(item)
+                if query:
+                    normalized.append(query)
+                continue
+            if not isinstance(item, dict):
+                continue
+            query = self._normalize_boolean_query(str(item.get("query") or ""))
+            if not query:
+                continue
+            normalized.append(
+                {
+                    "query": query,
+                    "match_mode": item.get("match_mode") or "all",
+                    "scope": item.get("scope") or "全部经历",
+                    "intent": item.get("intent") or "",
+                }
+            )
         return normalized
 
     def _extract_unique_copy_keywords(self, analysis_html: str) -> List[str]:
@@ -347,6 +413,51 @@ class SearchStrategyService:
                 return text
         return ""
 
+    def _extract_progressive_search_rounds(self, analysis_html: str) -> List[Dict[str, object]]:
+        section = self._extract_text_after_label(analysis_html, "渐进式搜索策略")
+        if not section:
+            return []
+        rounds = []
+        for line in self._split_to_points(section):
+            query = self._extract_query_from_round_text(line)
+            if not query:
+                continue
+            label = "第{}轮搜索".format(len(rounds) + 1)
+            label_match = re.search(r"第\s*(\d+)\s*轮(?:（([^）]+)）)?", line)
+            if label_match:
+                label = "第{}轮{}".format(label_match.group(1), label_match.group(2) or "搜索")
+            rounds.append(
+                {
+                    "label": label,
+                    "query": query,
+                    "intent": label,
+                    "priority": len(rounds) + 1,
+                    "match_mode": "any" if "OR模式" in line or "测绘" in line else "all",
+                    "scope": "全部经历",
+                }
+            )
+        return rounds[:6]
+
+    def _extract_query_from_round_text(self, text: str) -> str:
+        text = self._clean_text(text)
+        if not text:
+            return ""
+        candidates = []
+        for marker in ("示例：", "示例:", "：", ":"):
+            if marker in text:
+                candidates.append(text.rsplit(marker, 1)[-1])
+        candidates.append(text)
+        for candidate in candidates:
+            normalized = self._normalize_boolean_query(candidate)
+            match = re.search(
+                r"(.+\b(?:AND|OR|NOT)\b.+)",
+                normalized,
+                flags=re.IGNORECASE,
+            )
+            if match:
+                return self._normalize_boolean_query(match.group(1))
+        return ""
+
     def _split_to_points(self, text: str) -> List[str]:
         if not text:
             return []
@@ -392,10 +503,24 @@ class SearchStrategyService:
             }
             return atomic_terms
 
-        capability_terms = self._pick_capability_terms(precise_keywords + expansion_keywords)
-        domain_terms = self._pick_domain_terms(precise_keywords + expansion_keywords + synonyms)
-        process_terms = self._pick_process_terms(synonyms + self._split_query_terms(boolean_queries))
-        object_terms = self._pick_object_terms(synonyms + precise_keywords + expansion_keywords)
+        classified_terms = self._classify_search_terms(
+            precise_keywords=precise_keywords,
+            expansion_keywords=expansion_keywords,
+            synonyms=synonyms,
+            boolean_queries=boolean_queries,
+        )
+        capability_terms = classified_terms.get("capability_terms", [])
+        domain_terms = classified_terms.get("domain_terms", [])
+        process_terms = classified_terms.get("process_terms", [])
+        object_terms = classified_terms.get("object_terms", [])
+        if not capability_terms:
+            capability_terms = self._pick_capability_terms(precise_keywords + expansion_keywords)
+        if not domain_terms:
+            domain_terms = self._pick_domain_terms(precise_keywords + expansion_keywords + synonyms)
+        if not process_terms:
+            process_terms = self._pick_process_terms(synonyms + self._split_query_terms(boolean_queries))
+        if not object_terms:
+            object_terms = self._pick_object_terms(synonyms + precise_keywords + expansion_keywords)
         return {
             "domain_terms": domain_terms,
             "capability_terms": capability_terms,
@@ -409,15 +534,20 @@ class SearchStrategyService:
         atomic_terms: Dict[str, List[str]],
         precise_keywords: List[str],
         expansion_keywords: List[str],
+        synonyms: List[str],
         boolean_queries: List[str],
         search_intent: Dict[str, List[str]],
+        progressive_rounds: List[Dict[str, object]] = None,
     ) -> List[Dict[str, object]]:
         if search_intent.get("recommended_rounds"):
             rounds = []
             for index, item in enumerate(search_intent.get("recommended_rounds", []), start=1):
                 if isinstance(item, dict):
-                    query = self._normalize_query(item.get("query", ""))
-                    if not query:
+                    raw_query = item.get("query", "")
+                    if self._has_boolean_syntax(str(raw_query or "")):
+                        continue
+                    query = self._normalize_liepin_query(raw_query)
+                    if not query or self._is_noise_only_query(query):
                         continue
                     rounds.append(
                         {
@@ -427,11 +557,14 @@ class SearchStrategyService:
                             "priority": index,
                             "match_mode": item.get("match_mode") or "all",
                             "scope": item.get("scope") or "全部经历",
+                            "position_filter": item.get("position_filter") or "",
                         }
                     )
                 elif isinstance(item, str):
-                    normalized = self._normalize_query(item)
-                    if not normalized:
+                    if self._has_boolean_syntax(item):
+                        continue
+                    normalized = self._normalize_liepin_query(item)
+                    if not normalized or self._is_noise_only_query(normalized):
                         continue
                     rounds.append(
                         {
@@ -444,7 +577,26 @@ class SearchStrategyService:
                         }
                     )
             if rounds:
-                return rounds
+                return rounds[:4]
+
+        if progressive_rounds:
+            platform_rounds = [
+                item
+                for item in progressive_rounds
+                if not self._has_boolean_syntax(str(item.get("query") or ""))
+                and not self._is_noise_only_query(str(item.get("query") or ""))
+            ]
+            if platform_rounds:
+                return platform_rounds[:4]
+
+        matrix_rounds = self._build_keyword_matrix_rounds(
+            precise_keywords=precise_keywords,
+            expansion_keywords=expansion_keywords,
+            synonyms=synonyms,
+            boolean_queries=boolean_queries,
+        )
+        if matrix_rounds:
+            return matrix_rounds[:4]
 
         rounds = []
         seen = set()
@@ -492,8 +644,8 @@ class SearchStrategyService:
                     )
 
         for query in precise_keywords + expansion_keywords + self._split_query_terms(boolean_queries):
-            normalized = self._normalize_query(query)
-            if not normalized or normalized in seen:
+            normalized = self._normalize_boolean_query(query)
+            if not normalized or normalized in seen or self._is_noise_only_query(normalized):
                 continue
             seen.add(normalized)
             rounds.append(
@@ -505,7 +657,373 @@ class SearchStrategyService:
                 }
             )
 
-        return rounds[:8]
+        return rounds[:4]
+
+    def _build_keyword_matrix_rounds(
+        self,
+        precise_keywords: List[str],
+        expansion_keywords: List[str],
+        synonyms: List[str],
+        boolean_queries: List[str],
+    ) -> List[Dict[str, object]]:
+        classified_terms = self._classify_search_terms(
+            precise_keywords=precise_keywords,
+            expansion_keywords=expansion_keywords,
+            synonyms=synonyms,
+            boolean_queries=boolean_queries,
+        )
+        if not any(classified_terms.values()):
+            return []
+        title_terms = classified_terms.get("title_terms", [])
+        domain_terms = classified_terms.get("domain_terms", [])
+        position_terms = self._build_position_filter_terms(title_terms)
+
+        rounds = []
+        seen = set()
+        short_domains = [
+            term
+            for term in self._short_search_terms(domain_terms)
+            if not self._is_noise_only_query(term)
+        ]
+        if not short_domains:
+            return []
+        scene_queries = self._build_precise_scene_queries(short_domains)
+        position_filter = position_terms[0] if position_terms else ""
+
+        for query in scene_queries[:4]:
+            self._append_plain_round(
+                rounds,
+                seen,
+                label="第{}轮场景".format(len(rounds) + 1),
+                query_terms=[query],
+                intent="精准行业/业务场景",
+                position_filter=position_filter,
+            )
+
+        return rounds[:4]
+
+    def _build_precise_scene_queries(self, short_domains: List[str]) -> List[str]:
+        terms = self._merge_unique_lists([], short_domains or [])
+        scenes = []
+        has = lambda marker: any(marker in term for term in terms)
+        if has("文创") or has("潮玩"):
+            scenes.append("文创 潮玩")
+        if has("IP"):
+            scenes.append("IP衍生品")
+        if has("文创"):
+            scenes.append("文创衍生品")
+        if has("益智") or has("玩具") or has("科普"):
+            scenes.append("益智玩具 科普")
+        if has("展品") or has("展馆"):
+            scenes.append("展品 展馆")
+        if has("手办") and not has("潮玩"):
+            scenes.append("手办")
+        for index in range(0, len(terms), 2):
+            chunk_terms = [term for term in terms[index : index + 2] if not self._is_noise_only_query(term)]
+            chunk = " ".join(chunk_terms).strip()
+            if chunk:
+                scenes.append(chunk)
+        return self._merge_unique_lists([], scenes)
+
+    @staticmethod
+    def _build_position_filter_terms(title_terms: List[str]) -> List[str]:
+        terms = ["产品"]
+        for term in title_terms or []:
+            if not term:
+                continue
+            if "产品设计" in term:
+                terms.append("产品设计")
+            elif "设计总监" in term:
+                terms.append("设计总监")
+            elif "产品" in term:
+                terms.append("产品")
+            elif "研发" in term:
+                terms.append("研发")
+        result = []
+        for term in terms:
+            if term not in result:
+                result.append(term)
+        return result[:3]
+
+    def _short_search_terms(self, terms: List[str]) -> List[str]:
+        result = []
+        for term in terms or []:
+            short = self._to_short_search_term(term)
+            if short and short not in result:
+                result.append(short)
+        return result
+
+    @staticmethod
+    def _to_short_search_term(term: str) -> str:
+        term = (term or "").strip()
+        mapping = [
+            ("供应链", "供应链"),
+            ("从0到1", "从0到1"),
+            ("3D打印", "3D打印"),
+            ("文创", "文创"),
+            ("潮玩", "潮玩"),
+            ("展品", "展品"),
+            ("展馆", "展馆"),
+            ("科普", "科普"),
+            ("益智", "益智"),
+            ("玩具", "玩具"),
+            ("手办", "手办"),
+            ("量产", "量产"),
+            ("打样", "打样"),
+            ("工业设计", "工业设计"),
+            ("结构设计", "结构设计"),
+            ("产品设计", "产品设计"),
+            ("爆款", "爆款"),
+            ("团队搭建", "团队搭建"),
+        ]
+        for marker, replacement in mapping:
+            if marker in term:
+                return replacement
+        return term
+
+    def _classify_search_terms(
+        self,
+        precise_keywords: List[str],
+        expansion_keywords: List[str],
+        synonyms: List[str],
+        boolean_queries: List[str],
+    ) -> Dict[str, List[str]]:
+        terms = self._merge_unique_lists(
+            [],
+            list(precise_keywords or [])
+            + list(expansion_keywords or [])
+            + list(synonyms or [])
+            + self._split_query_terms(boolean_queries or []),
+        )
+        normalized_terms = [self._normalize_strategy_term(term) for term in terms]
+        normalized_terms = self._merge_unique_lists([], normalized_terms)
+        title_terms = self._prioritize_terms(
+            [term for term in normalized_terms if self._looks_like_title_term(term)],
+            ["产品总监", "产品设计经理", "产品开发总监", "设计总监", "产品研发经理", "研发经理", "NPD", "Director"],
+        )[:5]
+        domain_terms = self._prioritize_terms(
+            [
+                term
+                for term in normalized_terms
+                if self._looks_like_domain_term(term) and term not in title_terms
+            ],
+            ["文创", "潮玩", "展品", "展馆", "科普", "益智", "玩具", "手办", "IP"],
+        )[:6]
+        capability_terms = self._prioritize_terms(
+            [
+                term
+                for term in normalized_terms
+                if self._looks_like_capability_term(term) and term not in title_terms
+            ],
+            ["产品设计", "3D打印", "供应链", "量产", "工业设计", "结构设计", "打样", "模具"],
+        )[:8]
+        process_terms = self._prioritize_terms(
+            [term for term in normalized_terms if self._looks_like_outcome_term(term)],
+            ["从0到1", "爆款", "团队搭建", "商业转化", "盈利模型", "千万级"],
+        )[:5]
+        object_terms = self._prioritize_terms(
+            [
+                term
+                for term in normalized_terms
+                if term not in title_terms + domain_terms + capability_terms + process_terms
+                and self._looks_like_object_term(term)
+            ],
+            ["产品开发", "产品", "展品", "手办", "玩具"],
+        )[:5]
+        return {
+            "title_terms": title_terms,
+            "domain_terms": domain_terms,
+            "capability_terms": capability_terms,
+            "process_terms": process_terms,
+            "object_terms": object_terms,
+        }
+
+    @staticmethod
+    def _normalize_strategy_term(term: str) -> str:
+        term = (term or "").strip()
+        if not term:
+            return ""
+        if "供应链" in term:
+            return "供应链管理"
+        if "从立项到量产" in term:
+            return "量产"
+        if "打造爆款" in term:
+            return "爆款"
+        return term
+
+    @staticmethod
+    def _pick_first_matching(terms: List[str], hints: List[str]) -> str:
+        for hint in hints:
+            for term in terms or []:
+                if hint and term and hint in term:
+                    return term
+        return ""
+
+    def _append_plain_round(
+        self,
+        rounds: List[Dict[str, object]],
+        seen: set,
+        label: str,
+        query_terms: List[str],
+        intent: str,
+        position_filter: str = "",
+    ) -> None:
+        query = self._normalize_liepin_query(" ".join(term for term in query_terms if term))
+        if not query or query in seen:
+            return
+        seen.add(query)
+        rounds.append(
+            {
+                "label": label,
+                "query": query,
+                "intent": intent,
+                "priority": len(rounds) + 1,
+                "match_mode": "all",
+                "scope": "全部经历",
+                "position_filter": position_filter,
+            }
+        )
+
+    def _normalize_liepin_query(self, value: str) -> str:
+        query = self._normalize_boolean_query(value)
+        query = re.sub(r"\b(?:AND|OR|NOT)\b", " ", query, flags=re.IGNORECASE)
+        query = re.sub(r"[()\"'“”‘’]", " ", query)
+        return re.sub(r"\s+", " ", query).strip()
+
+    @staticmethod
+    def _has_boolean_syntax(value: str) -> bool:
+        return bool(re.search(r"\b(?:AND|OR|NOT)\b|[()\"“”]", value or "", re.IGNORECASE))
+
+    @staticmethod
+    def _is_noise_only_query(value: str) -> bool:
+        tokens = [token.strip() for token in re.split(r"\s+", value or "") if token.strip()]
+        if not tokens:
+            return True
+        noise_terms = {
+            "产品",
+            "设计",
+            "产品设计",
+            "产品研发",
+            "产品开发",
+            "研发",
+            "工业设计",
+            "结构设计",
+            "供应链",
+            "供应链管理",
+            "量产",
+            "量产落地",
+            "3D打印",
+            "打样",
+            "团队搭建",
+        }
+        return all(token in noise_terms for token in tokens)
+
+    @staticmethod
+    def _dedupe_overlapping_terms(terms: List[str]) -> List[str]:
+        result = []
+        for term in terms or []:
+            term = (term or "").strip()
+            if not term:
+                continue
+            if any(term == existing or existing in term for existing in result):
+                continue
+            result = [existing for existing in result if term not in existing]
+            result.append(term)
+        return result
+
+    @staticmethod
+    def _prioritize_terms(terms: List[str], priority_hints: List[str]) -> List[str]:
+        indexed_terms = list(enumerate(terms or []))
+
+        def score(item):
+            index, term = item
+            for priority, hint in enumerate(priority_hints):
+                if hint and term and (hint in term or term in hint):
+                    return priority, index
+            return len(priority_hints), index
+
+        return [term for _, term in sorted(indexed_terms, key=score)]
+
+    def _append_boolean_round(
+        self,
+        rounds: List[Dict[str, object]],
+        seen: set,
+        label: str,
+        query: str,
+        intent: str,
+        match_mode: str = "all",
+        scope: str = "全部经历",
+    ) -> None:
+        query = self._normalize_boolean_query(query)
+        if not query or query in seen:
+            return
+        seen.add(query)
+        rounds.append(
+            {
+                "label": label,
+                "query": query,
+                "intent": intent,
+                "priority": len(rounds) + 1,
+                "match_mode": match_mode,
+                "scope": scope,
+            }
+        )
+
+    @staticmethod
+    def _quote_if_needed(term: str) -> str:
+        term = (term or "").strip()
+        if not term:
+            return ""
+        if len(term) >= 4 and not (term.startswith('"') and term.endswith('"')):
+            return '"{}"'.format(term)
+        return term
+
+    @staticmethod
+    def _looks_like_title_term(term: str) -> bool:
+        term = (term or "").strip()
+        return bool(
+            term
+            and (
+                re.search(r"(总监|经理|负责人|主管|合伙人|Director|Manager|Head)", term, re.IGNORECASE)
+                or term in {"产品经理", "产品总监", "设计总监"}
+            )
+        )
+
+    @staticmethod
+    def _looks_like_domain_term(term: str) -> bool:
+        term = (term or "").strip()
+        return bool(
+            term
+            and re.search(
+                r"(文创|潮玩|玩具|展馆|展品|科普|益智|手办|IP|博物馆|科技馆|消费电子|工业产品|实体产品)",
+                term,
+            )
+        )
+
+    @staticmethod
+    def _looks_like_capability_term(term: str) -> bool:
+        term = (term or "").strip()
+        return bool(
+            term
+            and re.search(
+                r"(产品设计|工业设计|结构设计|3D打印|供应链|量产|打样|模具|CREO|SolidWorks|Rhino|FDM|SLA|SLS|产品开发)",
+                term,
+                re.IGNORECASE,
+            )
+        )
+
+    @staticmethod
+    def _looks_like_outcome_term(term: str) -> bool:
+        term = (term or "").strip()
+        return bool(
+            term
+            and re.search(r"(从0到1|爆款|团队搭建|千万级|市场占有率|盈利模型|上市变现|商业转化)", term)
+        )
+
+    @staticmethod
+    def _looks_like_object_term(term: str) -> bool:
+        term = (term or "").strip()
+        return bool(term and re.search(r"(产品|展品|手办|玩具|模具|样品|原型)", term))
 
     def _append_round(
         self,
@@ -613,6 +1131,30 @@ class SearchStrategyService:
     def _normalize_query(self, value: str) -> str:
         parts = self._split_compound_keyword(value)
         return " ".join(self._merge_unique_lists([], parts))
+
+    def _normalize_boolean_query(self, value: str) -> str:
+        """Normalize punctuation while preserving executable Boolean syntax."""
+        query = self._clean_text(value)
+        if not query:
+            return ""
+        replacements = {
+            "（": "(",
+            "）": ")",
+            "“": '"',
+            "”": '"',
+            "‘": "'",
+            "’": "'",
+            "，": " ",
+            "；": " ",
+            "　": " ",
+        }
+        for source, target in replacements.items():
+            query = query.replace(source, target)
+        query = query.replace("+", " AND ")
+        query = re.sub(r"\s+", " ", query).strip(" ,;；")
+        query = re.sub(r"\b(and|or|not)\b", lambda m: m.group(1).upper(), query, flags=re.IGNORECASE)
+        query = re.sub(r"\s+", " ", query).strip()
+        return query
 
     @staticmethod
     def _merge_unique_lists(base: List[str], extra: List[str]) -> List[str]:

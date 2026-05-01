@@ -3,7 +3,7 @@
 import json
 import re
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 
 from .llm_client import LLMClient
 from .prompt import MATCH_CRITERIA_GENERATION_PROMPT
@@ -51,15 +51,32 @@ class MatchCriteriaService:
 
     @staticmethod
     def build_fallback(jd_text: str) -> MatchCriteria:
-        """Build a usable default when the dedicated API output is malformed."""
+        """Build keyword-style fallback criteria when API output is malformed."""
         jd_text = (jd_text or "").strip()
-        title_hint = jd_text[:80] if jd_text else "目标岗位"
         now = datetime.now().isoformat(timespec="seconds")
+        core = MatchCriteriaService._pick_terms(
+            jd_text,
+            ["IP", "潮玩", "文创", "文创衍生品", "衍生品", "玩具", "益智玩具", "科普", "博物馆", "展馆", "展品"],
+        )
+        adjacent = MatchCriteriaService._pick_terms(
+            jd_text,
+            ["消费品", "礼品", "儿童产品", "教育产品", "手办", "实体产品", "工业设计", "结构设计", "供应链", "量产"],
+        )
+        role = MatchCriteriaService._pick_terms(
+            jd_text,
+            ["产品", "产品设计", "设计总监", "产品总监", "产品负责人", "研发负责人", "设计经理"],
+        )
+        if not core:
+            core = ["目标行业/产品形态关键词", "岗位核心业务场景关键词"]
+        if not adjacent:
+            adjacent = ["相邻行业产品经验", "实体产品或项目经验"]
+        if not role:
+            role = ["目标岗位相关职位名或职责词"]
         return MatchCriteria(
             dealbreakers=[
                 MatchCriterionItem(
                     id="db_1",
-                    text="候选人经历与目标岗位方向明显无关",
+                    text="APP / SaaS / UI / 网页 / 建筑 / 室内 / 服装",
                     enabled=True,
                     weight=0,
                 )
@@ -67,33 +84,15 @@ class MatchCriteriaService:
             core_requirements=[
                 MatchCriterionItem(
                     id="cr_1",
-                    text="最近经历与岗位核心业务或产品领域相关：{}".format(title_hint),
+                    text=" / ".join(core[:6]),
                     enabled=True,
-                    weight=40,
-                ),
-                MatchCriterionItem(
-                    id="cr_2",
-                    text="具备岗位要求的主要职责经验，并能在简历中看到可核验证据",
-                    enabled=True,
-                    weight=35,
-                ),
-                MatchCriterionItem(
-                    id="cr_3",
-                    text="年限、学历、城市等基础条件没有明显冲突",
-                    enabled=True,
-                    weight=25,
+                    weight=0,
                 ),
             ],
             basic_requirements=[
                 MatchCriterionItem(
                     id="br_1",
-                    text="简历信息完整，能看清最近工作经历和职责",
-                    enabled=True,
-                    weight=0,
-                ),
-                MatchCriterionItem(
-                    id="br_2",
-                    text="当前职级或职责范围与岗位大致匹配",
+                    text=" / ".join(adjacent[:6]),
                     enabled=True,
                     weight=0,
                 ),
@@ -101,24 +100,27 @@ class MatchCriteriaService:
             bonuses=[
                 MatchCriterionItem(
                     id="bo_1",
-                    text="有同类公司、同类产品或同类项目经验",
-                    enabled=True,
-                    weight=0,
-                ),
-                MatchCriterionItem(
-                    id="bo_2",
-                    text="简历中出现可量化成果或关键项目案例",
+                    text=" / ".join(role[:6]),
                     enabled=True,
                     weight=0,
                 ),
             ],
             misjudgment_reminders=[
-                "不要只看职位名称，要看最近 3-5 年实际项目和产品方向。",
-                "JD 未明确的信息不要强行判定不匹配，标为待验证。",
+                "没有核心场景词时，不要因为职位名相同就给高档。",
+                "相邻相关词只能支持 B 类待验证，不能单独支撑 A。",
+                "简历未体现不等于不匹配，标为待验证并给出追问。",
             ],
-            version=1,
+            version=2,
             confirmed_at=now,
         )
+
+    @staticmethod
+    def _pick_terms(text: str, candidates: List[str]) -> List[str]:
+        picked = []
+        for term in candidates:
+            if term and term in text and term not in picked:
+                picked.append(term)
+        return picked
 
     def to_rendered_text(self, criteria: MatchCriteria) -> str:
         """Render criteria into text suitable for batch match prompts."""
@@ -126,10 +128,10 @@ class MatchCriteriaService:
             return ""
         lines = []
         for title, items in (
-            ("一票否决", criteria.dealbreakers),
-            ("核心要求", criteria.core_requirements),
-            ("基础要求", criteria.basic_requirements),
-            ("加分项", criteria.bonuses),
+            ("排除词 / 负向方向", criteria.dealbreakers),
+            ("核心命中词", criteria.core_requirements),
+            ("相邻相关词", criteria.basic_requirements),
+            ("泛能力/职位参考词", criteria.bonuses),
         ):
             active = [item for item in items if item.enabled]
             if not active:

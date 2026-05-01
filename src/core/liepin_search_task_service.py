@@ -102,6 +102,10 @@ class LiepinSearchTaskService:
                         "query": query,
                         "label": round_info.get("label") or "第{}轮搜索".format(round_index),
                         "priority": round_info.get("priority") or round_index,
+                        "match_mode": round_info.get("match_mode") or "all",
+                        "scope": round_info.get("scope") or "全部经历",
+                        "position_filter": round_info.get("position_filter") or "",
+                        "intent": round_info.get("intent") or "",
                     }
                 )
                 round_stats = {
@@ -109,6 +113,10 @@ class LiepinSearchTaskService:
                     "query": query,
                     "label": round_info.get("label") or "第{}轮搜索".format(round_index),
                     "priority": round_info.get("priority") or round_index,
+                    "match_mode": round_info.get("match_mode") or "all",
+                    "scope": round_info.get("scope") or "全部经历",
+                    "position_filter": round_info.get("position_filter") or "",
+                    "intent": round_info.get("intent") or "",
                     "pages_processed": 0,
                     "raw_candidates": 0,
                     "accepted_candidates": 0,
@@ -125,7 +133,7 @@ class LiepinSearchTaskService:
                     current_step="执行第 {} 轮搜索：{}".format(round_index, query),
                 )
                 try:
-                    candidates = self._search_with_filters(query, filters)
+                    candidates = self._search_with_filters(query, filters, round_info)
                 except LiepinSearchNoResultsError as exc:
                     logger.warning("[run_task] round=%s query=%s empty results: %s", round_index, query, exc)
                     round_stats["pages_processed"] += 1
@@ -233,18 +241,32 @@ class LiepinSearchTaskService:
             )
             raise
 
-    def _search_with_filters(self, query: str, filters: Dict[str, object]):
-        """Search with filters while keeping compatibility with older test doubles."""
-        if filters:
+    def _search_with_filters(
+        self, query: str, filters: Dict[str, object], round_info: Optional[Dict[str, object]] = None
+    ):
+        """Search with filters and per-round mode/scope while preserving test-double compatibility."""
+        round_info = round_info or {}
+        controls = {
+            "match_mode": round_info.get("match_mode") or "",
+            "scope": round_info.get("scope") or "",
+            "position_filter": round_info.get("position_filter") or "",
+        }
+        controls = {key: value for key, value in controls.items() if value}
+        if filters or controls:
             try:
-                return self.search_service.search(query, filters=filters)
+                return self.search_service.search(query, filters=filters, **controls)
             except TypeError:
-                candidates = self.search_service.search(query)
-                if hasattr(self.search_service, "apply_filters"):
-                    self.search_service.apply_filters(filters)
-                    if hasattr(self.search_service, "extract_current_page_candidates"):
-                        return self.search_service.extract_current_page_candidates()
-                return candidates
+                try:
+                    if filters:
+                        return self.search_service.search(query, filters=filters)
+                    return self.search_service.search(query)
+                except TypeError:
+                    candidates = self.search_service.search(query)
+                    if filters and hasattr(self.search_service, "apply_filters"):
+                        self.search_service.apply_filters(filters)
+                        if hasattr(self.search_service, "extract_current_page_candidates"):
+                            return self.search_service.extract_current_page_candidates()
+                    return candidates
         return self.search_service.search(query)
 
     def _pick_source_keyword(self, task: SearchTask) -> str:
@@ -266,6 +288,9 @@ class LiepinSearchTaskService:
                     "query": query,
                     "intent": item.get("intent") or "",
                     "priority": item.get("priority") or len(rounds) + 1,
+                    "match_mode": item.get("match_mode") or "all",
+                    "scope": item.get("scope") or "全部经历",
+                    "position_filter": item.get("position_filter") or "",
                 }
             )
         if rounds:
@@ -492,6 +517,7 @@ class LiepinSearchTaskService:
                     "label": item.get("label") or "",
                     "query": item.get("query") or "",
                     "priority": item.get("priority") or 0,
+                    "position_filter": item.get("position_filter") or "",
                 }
                 for item in (rounds or [])
             ],

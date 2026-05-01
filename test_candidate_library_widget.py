@@ -142,6 +142,33 @@ def test_candidate_library_widget_passes_confirmed_filters_to_handler():
     root.destroy()
 
 
+def test_auto_grab_confirm_dialog_parses_edited_filters_and_rounds():
+    from src.ui.candidate_library_widget import AutoGrabConfirmDialog
+
+    filters = AutoGrabConfirmDialog._parse_filter_text(
+        "城市：深圳、广州\n工作年限：3-5年\n教育经历：本科\n性别：不限\n活跃度：近一周"
+    )
+    rounds = AutoGrabConfirmDialog._parse_round_text(
+        '搜索计划（共 2 轮）：\n第1轮：算法 OR 推荐\n第2轮："搜索排序" AND 字节',
+        [
+            {"label": "测绘", "match_mode": "any", "scope": "全部经历"},
+            {"label": "精准", "match_mode": "all", "scope": "目前职位"},
+        ],
+    )
+
+    assert filters == {
+        "目前城市": ["深圳", "广州"],
+        "工作年限": "3-5年",
+        "教育经历": "本科",
+        "性别": "不限",
+        "活跃度": "近一周",
+    }
+    assert rounds[0]["query"] == "算法 OR 推荐"
+    assert rounds[0]["match_mode"] == "any"
+    assert rounds[1]["query"] == '"搜索排序" AND 字节'
+    assert rounds[1]["scope"] == "目前职位"
+
+
 def test_candidate_library_widget_lists_source_keywords_in_candidate_records():
     root = create_root()
     widget = CandidateLibraryWidget(
