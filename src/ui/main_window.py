@@ -1,6 +1,7 @@
 """主窗口 UI 模块。"""
 
 import json
+import logging
 import re
 import threading
 import os
@@ -15,6 +16,8 @@ from ..core.candidate_excel_service import CandidateExcelService
 from ..core.company_research_client import CompanyResearchClient
 from ..core.config import ConfigManager
 from ..core.database import DatabaseManager
+from ..core.auto_greeting_service import AutoGreetingService
+from ..core.greeting_text_generation_service import GreetingTextGenerationService
 from ..core.history import HistoryManager
 from ..core.liepin_browser import LiepinBrowserManager
 from ..core.match_criteria_service import MatchCriteriaService
@@ -35,6 +38,7 @@ from ..core.search_task_repository import SearchTaskRepository
 from ..core.task_queue import TaskCategory, TaskQueue
 from ..models import MatchCriteria
 from .batch_match_widget import BatchMatchWidget
+from .greeting_generator_widget import GreetingGeneratorWidget
 from .task_panel import TaskPanel
 from ..utils.helpers import validate_api_key, validate_url
 from .candidate_library_widget import CandidateLibraryWidget
@@ -45,6 +49,8 @@ from .job_analysis_widget import JobAnalysisWidget
 from .match_criteria_widget import MatchCriteriaWidget
 from .resume_match_widget import ResumeMatchWidget
 from .search_strategy_widget import SearchStrategyWidget
+
+logger = logging.getLogger(__name__)
 
 
 class MainWindow(ctk.CTk):
@@ -88,6 +94,10 @@ class MainWindow(ctk.CTk):
             candidate_excel_service=self.candidate_excel_service,
             search_service=self.liepin_search_service,
             resume_extractor=self.liepin_resume_extractor,
+        )
+        self.auto_greeting_service = AutoGreetingService(
+            browser_manager=self.liepin_browser_manager,
+            excel_service=self.candidate_excel_service,
         )
 
         self.title("智能岗位分析与寻访助手")
@@ -277,6 +287,7 @@ class MainWindow(ctk.CTk):
         self.tab_resume = self.tabview.add("简历匹配")
         self.tab_candidates = self.tabview.add("候选人抓取")
         self.tab_batch = self.tabview.add("批量匹配")
+        self.tab_greeting = self.tabview.add("打招呼生成")
 
         self._build_company_research_tab()
         self._build_job_analysis_tab()
@@ -285,6 +296,7 @@ class MainWindow(ctk.CTk):
         self._build_resume_match_tab()
         self._build_candidate_library_tab()
         self._build_batch_match_tab()
+        self._build_greeting_generator_tab()
 
     def _build_job_analysis_tab(self):
         """构建岗位分析标签页。"""
@@ -388,9 +400,28 @@ class MainWindow(ctk.CTk):
             on_open_excel=self._on_open_candidate_excel,
             on_open_excel_dir=self._on_open_candidate_excel_dir,
             on_pick_job_history=self._open_job_history_picker,
+            on_auto_greet=self._on_auto_greet,
             theme=self.FIXED_THEME,
         )
         self.batch_match_widget.grid(
+            row=0, column=0, columnspan=2, sticky="nsew", padx=5, pady=5
+        )
+
+    def _build_greeting_generator_tab(self):
+        """构建打招呼生成器标签页。"""
+        self.tab_greeting.grid_columnconfigure(0, weight=2)
+        self.tab_greeting.grid_columnconfigure(1, weight=3)
+        self.tab_greeting.grid_rowconfigure(0, weight=1)
+
+        self.greeting_generator_widget = GreetingGeneratorWidget(
+            self.tab_greeting,
+            on_generate=self._on_generate_greeting,
+            on_generate_batch=self._on_generate_greeting_batch,
+            on_use_for_auto=self._on_use_greeting_for_auto,
+            on_pick_job_history=self._open_job_history_picker,
+            theme=self.FIXED_THEME,
+        )
+        self.greeting_generator_widget.grid(
             row=0, column=0, columnspan=2, sticky="nsew", padx=5, pady=5
         )
 
@@ -467,6 +498,8 @@ class MainWindow(ctk.CTk):
             self.model_entry.insert(0, config.model_name)
         if config.tavily_api_key:
             self.tavily_key_entry.insert(0, config.tavily_api_key)
+        if config.greeting_template and hasattr(self, "batch_match_widget"):
+            self.batch_match_widget.set_auto_greet_message(config.greeting_template)
 
     def _on_save_config(self):
         """保存配置按钮点击事件。"""
@@ -564,15 +597,49 @@ class MainWindow(ctk.CTk):
                 "{}\n{}".format(record.result or "", record.jd_text or "")
             )
             strategy_payload = self.search_strategy_service.to_payload(strategy)
+        city = self._extract_job_city(record.jd_text, record.result)
+        salary_range = self._extract_salary_range(record.jd_text)
         return {
             "record_id": record.id,
             "title": record.title,
+            "job_title": record.title,
+            "city": city,
+            "salary_range": salary_range,
             "job_description": record.jd_text,
             "analysis_result": record.result,
             "strategy": strategy_payload,
             "strategy_round_count": len(strategy_payload.get("executable_rounds", [])),
             "match_criteria": record.match_criteria_json or "",
         }
+
+    @staticmethod
+    def _extract_job_city(jd_text: str, analysis_result: str = "") -> str:
+        """Extract a likely city from JD/analysis text for greeting copy."""
+        text = "{}\n{}".format(jd_text or "", analysis_result or "")
+        patterns = [
+            r"(?:工作地点|办公地点|工作城市|所在城市|城市|base|Base|BASE)[：:\s]*([^\n，,。；;]{2,24})",
+            r"base\s*([^\n，,。；;]{2,24})",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, text)
+            if match:
+                raw = re.sub(r"[\s\-_/]+", "", match.group(1))
+                return GreetingTextGenerationService._extract_prefecture_city(raw)
+        return ""
+
+    @staticmethod
+    def _extract_salary_range(jd_text: str) -> str:
+        """Extract salary text only for preview; generated greetings still mask it."""
+        text = jd_text or ""
+        patterns = [
+            r"(?:薪资|薪酬|月薪|年薪|待遇)[：:\s]*([^\n，,。；;]{2,32})",
+            r"(\d+\s*[-~到]\s*\d+\s*[kK万wW](?:/月|/年|月|年)?)",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, text)
+            if match:
+                return match.group(1).strip()
+        return ""
 
     def _load_record_search_strategy_payload(self, record) -> Optional[dict]:
         """Return persisted dedicated search strategy payload when available."""
@@ -1672,6 +1739,246 @@ class MainWindow(ctk.CTk):
             self.batch_match_widget.set_results(summary_text)
         self._set_status("批量匹配完成")
 
+    def _on_auto_greet(self, excel_path: str, message: str = ""):
+        """启动自动打招呼任务（一站式：启动浏览器→导航→登录→打招呼）。"""
+        if not excel_path:
+            messagebox.showwarning("提示", "请先导入候选人 Excel")
+            return
+
+        message = (message or "").strip() or self.config_manager.config.greeting_template
+        try:
+            greetable_candidates = self.candidate_excel_service.load_greetable_candidates(
+                excel_path,
+                tiers={"A", "B"},
+                require_gold_collar=True,
+                require_no_contact=True,
+            )
+        except Exception as exc:
+            messagebox.showerror("读取失败", str(exc))
+            return
+        if not greetable_candidates:
+            messagebox.showwarning(
+                "没有可打招呼候选人",
+                "当前 Excel 中没有“明确 A/B 档 + 金领 + 无联系方式 + 尚未打过招呼”的候选人。\n"
+                "请先完成批量匹配，并确认 Excel 中的人才标签和联系方式。",
+            )
+            self._set_status("自动打招呼取消：没有符合额度策略的候选人")
+            return
+
+        # Step 1: Ensure browser is running and navigated to Liepin
+        try:
+            state = self.liepin_browser_manager.get_state()
+            if not state.is_running:
+                self._set_status("正在启动猎聘浏览器...")
+                self.liepin_browser_manager.launch()
+                self.liepin_browser_manager.open_home()
+                self._set_status("浏览器已启动，请登录")
+            elif not state.logged_in:
+                # Browser running but not on Liepin, navigate home
+                self.liepin_browser_manager.open_home()
+        except Exception as exc:
+            messagebox.showerror("浏览器启动失败", str(exc))
+            return
+
+        # Step 2: Check login with retry dialog
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                if self.liepin_browser_manager.is_logged_in():
+                    break
+            except Exception:
+                pass
+            
+            if attempt < max_retries - 1:
+                if messagebox.askyesno(
+                    "等待登录",
+                    f"请在弹出的浏览器中完成猎聘登录。\n\n"
+                    f"登录完成后点击「是」继续。\n"
+                    f"（第 {attempt + 1}/{max_retries} 次尝试）"
+                ):
+                    continue
+                else:
+                    self._set_status("用户取消自动打招呼")
+                    return
+            else:
+                messagebox.showwarning("未登录", "猎聘登录失败，请检查浏览器状态")
+                self._set_status("自动打招呼取消：未登录")
+                return
+
+        # Step 3: Confirm and start
+        count = len(greetable_candidates)
+        preview_names = "、".join(
+            (item.name or "未命名") for item in greetable_candidates[:8]
+        )
+        if count > 8:
+            preview_names += " 等"
+        template_hint = "将使用自定义消息。" if message else "将使用平台默认打招呼。"
+        
+        if not messagebox.askyesno(
+            "确认开始",
+            f"即将向 Excel 中“明确 A/B 档 + 金领 + 无联系方式”的候选人发送打招呼消息。\n\n"
+            f"文件：{os.path.basename(excel_path)}\n"
+            f"预计处理人数：{count} 人\n"
+            f"候选人：{preview_names}\n"
+            f"{template_hint}\n\n"
+            f"每个候选人之间有 3-8 秒随机延迟。\n"
+            f"是否继续？"
+        ):
+            self._set_status("用户取消自动打招呼")
+            return
+
+        self.batch_match_widget.set_auto_greet_running(True)
+        self._set_status("开始自动打招呼...")
+
+        def _run():
+            try:
+                service = AutoGreetingService(
+                    self.liepin_browser_manager,
+                    excel_service=self.candidate_excel_service,
+                )
+                
+                def progress(current, total, name):
+                    self.after(0, lambda: self.batch_match_widget.set_progress(
+                        current, total, name
+                    ))
+                
+                results = service.greet_candidates_from_excel(
+                    excel_path=excel_path,
+                    message_template=message,
+                    tiers={"A", "B"},
+                    require_gold_collar=True,
+                    require_no_contact=True,
+                    progress_callback=progress,
+                )
+                
+                summary = service.generate_summary(results)
+                self.after(0, lambda: self.batch_match_widget.set_results(summary))
+                self.after(0, lambda: self._set_status("自动打招呼完成"))
+            except Exception as exc:
+                logger.error("Auto greet failed: %s", exc)
+                self.after(0, lambda: messagebox.showerror("打招呼失败", str(exc)))
+                self.after(0, lambda: self._set_status("自动打招呼失败"))
+            finally:
+                self.after(0, lambda: self.batch_match_widget.set_auto_greet_running(False))
+
+        threading.Thread(target=_run, daemon=True).start()
+
+    def _on_use_greeting_for_auto(self, text: str):
+        """Persist the generated greeting as the default auto-greeting template."""
+        template = (text or "").strip()
+        if not template:
+            messagebox.showwarning("提示", "没有可保存的打招呼文本")
+            return
+        self.config_manager.update(greeting_template=template)
+        if not self.config_manager.save_config():
+            messagebox.showerror("错误", "打招呼模板保存失败")
+            return
+        if hasattr(self, "batch_match_widget"):
+            self.batch_match_widget.set_auto_greet_message(template)
+        self._set_status("自动打招呼模板已保存")
+        messagebox.showinfo(
+            "设置成功",
+            "已保存为自动打招呼默认模板，并同步到批量匹配页。",
+        )
+
+    def _on_generate_greeting(self, job_label: str, payload: dict):
+        """生成单个打招呼文本。"""
+        config = self._validate_llm_config()
+        if not config:
+            return
+        url, key, model = config
+
+        # Extract job info from payload (兼容现有历史记录格式)
+        job_title = payload.get("job_title", "") or payload.get("title", "")
+        job_description = payload.get("job_description", "")
+        city = payload.get("city", "") or self._extract_job_city(
+            job_description, payload.get("analysis_result", "")
+        )
+        salary_range = payload.get("salary_range", "") or self._extract_salary_range(
+            job_description
+        )
+
+        if not job_title or not job_description:
+            messagebox.showwarning("提示", "岗位信息不完整，无法生成打招呼文本\n\n"
+                                   "请确保选择了有完整岗位信息的分析记录。")
+            return
+
+        self.greeting_generator_widget.set_generating(True)
+        self.greeting_generator_widget.set_job_info(job_title, city, salary_range)
+        self._set_status("正在生成打招呼文本...")
+
+        def _generate():
+            try:
+                client = self._create_llm_client(url, key, model, 60)
+                service = GreetingTextGenerationService(client)
+                
+                text = service.generate(
+                    job_title=job_title,
+                    city=city,
+                    job_description=job_description,
+                    salary_range=salary_range,
+                )
+                
+                self.after(0, lambda: self.greeting_generator_widget.set_result_text(text))
+                self.after(0, lambda: self._set_status("打招呼文本生成完成"))
+            except Exception as exc:
+                logger.error("Failed to generate greeting: %s", exc)
+                self.after(0, lambda: messagebox.showerror("生成失败", str(exc)))
+                self.after(0, lambda: self._set_status("打招呼文本生成失败"))
+            finally:
+                self.after(0, lambda: self.greeting_generator_widget.set_generating(False))
+
+        threading.Thread(target=_generate, daemon=True).start()
+
+    def _on_generate_greeting_batch(self, job_label: str, payload: dict):
+        """批量生成5个打招呼文本变体。"""
+        config = self._validate_llm_config()
+        if not config:
+            return
+        url, key, model = config
+
+        job_title = payload.get("job_title", "") or payload.get("title", "")
+        job_description = payload.get("job_description", "")
+        city = payload.get("city", "") or self._extract_job_city(
+            job_description, payload.get("analysis_result", "")
+        )
+        salary_range = payload.get("salary_range", "") or self._extract_salary_range(
+            job_description
+        )
+
+        if not job_title or not job_description:
+            messagebox.showwarning("提示", "岗位信息不完整，无法生成打招呼文本\n\n"
+                                   "请确保选择了有完整岗位信息的分析记录。")
+            return
+
+        self.greeting_generator_widget.set_generating(True)
+        self.greeting_generator_widget.set_job_info(job_title, city, salary_range)
+        self._set_status("正在批量生成打招呼文本...")
+
+        def _generate_batch():
+            try:
+                client = self._create_llm_client(url, key, model, 120)
+                service = GreetingTextGenerationService(client)
+                
+                texts = service.generate_batch(
+                    job_title=job_title,
+                    city=city,
+                    job_description=job_description,
+                    salary_range=salary_range,
+                    count=5,
+                )
+                
+                self.after(0, lambda: self.greeting_generator_widget.set_batch_results(texts))
+                self.after(0, lambda: self._set_status("批量打招呼文本生成完成"))
+            except Exception as exc:
+                logger.error("Failed to generate batch greetings: %s", exc)
+                self.after(0, lambda: messagebox.showerror("生成失败", str(exc)))
+                self.after(0, lambda: self._set_status("批量打招呼文本生成失败"))
+            finally:
+                self.after(0, lambda: self.greeting_generator_widget.set_generating(False))
+
+        threading.Thread(target=_generate_batch, daemon=True).start()
+
     def _on_import_candidate_excel(self):
         file_path = filedialog.askopenfilename(
             title="选择候选人 Excel",
@@ -1863,11 +2170,13 @@ class MainWindow(ctk.CTk):
                         break
 
     def _update_batch_job_list(self, selected_record=None):
-        """更新批量匹配页的岗位列表。"""
+        """更新批量匹配页和打招呼生成器的岗位列表。"""
         records = self.job_history_manager.get_all()
         if not records:
             if hasattr(self, "batch_match_widget"):
                 self.batch_match_widget.update_job_options(["请先分析岗位"], {})
+            if hasattr(self, "greeting_generator_widget"):
+                self.greeting_generator_widget.update_job_options(["请先分析岗位"], {})
             return
 
         job_options = []
@@ -1883,6 +2192,14 @@ class MainWindow(ctk.CTk):
                 for label, payload in job_data_map.items():
                     if payload.get("record_id") == selected_record.id:
                         self.batch_match_widget.set_selected_job(label)
+                        break
+
+        if hasattr(self, "greeting_generator_widget"):
+            self.greeting_generator_widget.update_job_options(job_options, job_data_map)
+            if selected_record is not None:
+                for label, payload in job_data_map.items():
+                    if payload.get("record_id") == selected_record.id:
+                        self.greeting_generator_widget.set_selected_job(label)
                         break
 
     def _open_job_history_picker(self):

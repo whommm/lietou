@@ -29,6 +29,7 @@ class BatchMatchWidget(ctk.CTkFrame):
         on_open_excel: Optional[Callable] = None,
         on_open_excel_dir: Optional[Callable] = None,
         on_pick_job_history: Optional[Callable] = None,
+        on_auto_greet: Optional[Callable] = None,
         theme: str = "light",
         **kwargs,
     ):
@@ -39,6 +40,7 @@ class BatchMatchWidget(ctk.CTkFrame):
         self.on_open_excel = on_open_excel
         self.on_open_excel_dir = on_open_excel_dir
         self.on_pick_job_history = on_pick_job_history
+        self.on_auto_greet = on_auto_greet
         self.theme = theme
         self.job_options: List[str] = ["请先分析岗位"]
         self.job_data_map: Dict[str, Dict[str, object]] = {}
@@ -58,15 +60,20 @@ class BatchMatchWidget(ctk.CTkFrame):
 
     def _build_control_panel(self):
         colors = self.PALETTE
-        frame = ctk.CTkFrame(
+        # 使用可滚动frame，确保所有内容都可见
+        # 使用可滚动frame确保所有内容可见
+        scroll_frame = ctk.CTkScrollableFrame(
             self,
             corner_radius=24,
             fg_color=colors["panel"],
             border_width=1,
             border_color=colors["border"],
+            scrollbar_button_color=colors["accent"],
+            scrollbar_button_hover_color=colors["accent_hover"],
         )
-        frame.grid(row=0, column=0, padx=(10, 5), pady=10, sticky="nsew")
-        frame.grid_columnconfigure(0, weight=1)
+        scroll_frame.grid(row=0, column=0, padx=(10, 5), pady=10, sticky="nsew")
+        # CTkScrollableFrame 内部已经有一个 frame，我们直接在里面添加组件
+        frame = scroll_frame
 
         ctk.CTkLabel(
             frame,
@@ -233,7 +240,56 @@ class BatchMatchWidget(ctk.CTkFrame):
             command=self._on_cancel_batch_click,
             state="disabled",
         )
-        self.cancel_batch_btn.grid(row=8, column=0, padx=16, pady=(0, 16), sticky="ew")
+        self.cancel_batch_btn.grid(row=8, column=0, padx=16, pady=(0, 10), sticky="ew")
+
+        # Auto greeting section
+        greeting_card = ctk.CTkFrame(
+            frame,
+            corner_radius=14,
+            fg_color=colors["panel_alt"],
+            border_width=1,
+            border_color=colors["border"],
+        )
+        greeting_card.grid(row=9, column=0, padx=16, pady=(0, 10), sticky="ew")
+
+        ctk.CTkLabel(
+            greeting_card,
+            text="自动打招呼",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color=colors["text"],
+        ).pack(anchor="w", padx=12, pady=(10, 4))
+
+        ctk.CTkLabel(
+            greeting_card,
+            text="匹配完成后，自动向 A/B 级候选人发送打招呼消息。",
+            font=ctk.CTkFont(size=11),
+            text_color=colors["muted"],
+            justify="left",
+            wraplength=260,
+        ).pack(anchor="w", padx=12, pady=(0, 8))
+
+        self.greeting_message_entry = ctk.CTkEntry(
+            greeting_card,
+            placeholder_text="打招呼消息（可选，留空使用默认）",
+            corner_radius=12,
+            height=32,
+            fg_color=colors["panel"],
+            border_color=colors["border"],
+        )
+        self.greeting_message_entry.pack(fill="x", padx=12, pady=(0, 8))
+
+        self.auto_greet_btn = ctk.CTkButton(
+            greeting_card,
+            text="开始自动打招呼",
+            height=36,
+            corner_radius=18,
+            fg_color="#10b981",
+            hover_color="#059669",
+            text_color="#ffffff",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            command=self._on_auto_greet_click,
+        )
+        self.auto_greet_btn.pack(fill="x", padx=12, pady=(0, 10))
 
     def _build_status_panel(self):
         colors = self.PALETTE
@@ -364,6 +420,31 @@ class BatchMatchWidget(ctk.CTkFrame):
     def _on_open_excel_dir_click(self):
         if self.on_open_excel_dir:
             self.on_open_excel_dir()
+
+    def _on_auto_greet_click(self):
+        if not self._excel_file_path:
+            messagebox.showwarning("提示", "请先导入候选人 Excel")
+            return
+        if self.on_auto_greet:
+            message = self.greeting_message_entry.get().strip()
+            self.on_auto_greet(self._excel_file_path, message)
+
+    def get_auto_greet_message(self) -> str:
+        """Return the custom greeting message if entered."""
+        return self.greeting_message_entry.get().strip()
+
+    def set_auto_greet_message(self, message: str):
+        """Set the reusable greeting message shown in the batch workflow."""
+        self.greeting_message_entry.delete(0, "end")
+        if message:
+            self.greeting_message_entry.insert(0, message)
+
+    def set_auto_greet_running(self, running: bool):
+        """Update UI when auto-greeting starts or completes."""
+        self.auto_greet_btn.configure(
+            text="打招呼中..." if running else "开始自动打招呼",
+            state="disabled" if running else "normal",
+        )
 
     def _on_concurrency_change(self, _event=None):
         val = int(round(self.concurrency_slider.get()))

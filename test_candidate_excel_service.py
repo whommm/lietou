@@ -79,8 +79,16 @@ def test_candidate_excel_service_filters_matchable_rows_and_writes_results(tmp_p
     target = [item for item in updated if item.row_index == success_row][0]
 
     assert target.match_score == 86
+    assert target.match_tier == "A"
     assert target.match_detail == "建议优先推进"
     assert target.matched_at
+    assert service.count_greetable_candidates(file_path) == 1
+
+    service.write_greeting_result(file_path, success_row, "发送成功", "您好")
+    greeted = [item for item in service.load_candidates(file_path) if item.row_index == success_row][0]
+    assert greeted.greeting_status == "发送成功"
+    assert greeted.greeting_message == "您好"
+    assert service.count_greetable_candidates(file_path) == 0
 
 
 def test_candidate_excel_service_loads_matchable_rows_by_round_rows(tmp_path):
@@ -123,3 +131,53 @@ def test_candidate_excel_service_loads_matchable_rows_by_round_rows(tmp_path):
 
     assert [item.row_index for item in by_rows] == [row_two]
     assert [item.row_index for item in by_keyword] == [row_one]
+
+
+def test_candidate_excel_service_filters_greetable_gold_collar_without_contact(tmp_path):
+    service = CandidateExcelService(workspace_root=str(tmp_path))
+    file_path = service.create_workbook("金领候选人")
+
+    gold_row = service.append_candidate_row(
+        file_path,
+        {
+            "序号": 1,
+            "姓名": "赵六",
+            "简历链接": "https://example.com/resume/gold",
+            "简历抓取状态": service.CAPTURE_STATUS_SUCCESS,
+            "简历详情": "金领人才，完整简历",
+            "匹配档位": "A",
+            "人才标签": "金领",
+            "联系方式": "",
+        },
+    )
+    service.append_candidate_row(
+        file_path,
+        {
+            "序号": 2,
+            "姓名": "钱七",
+            "简历链接": "https://example.com/resume/contact",
+            "简历抓取状态": service.CAPTURE_STATUS_SUCCESS,
+            "简历详情": "金领人才，电话 13800138000",
+            "匹配档位": "A",
+            "人才标签": "金领",
+        },
+    )
+    service.append_candidate_row(
+        file_path,
+        {
+            "序号": 3,
+            "姓名": "孙八",
+            "简历链接": "https://example.com/resume/normal",
+            "简历抓取状态": service.CAPTURE_STATUS_SUCCESS,
+            "简历详情": "普通候选人",
+            "匹配档位": "A",
+        },
+    )
+
+    strict = service.load_greetable_candidates(
+        file_path,
+        require_gold_collar=True,
+        require_no_contact=True,
+    )
+
+    assert [item.row_index for item in strict] == [gold_row]

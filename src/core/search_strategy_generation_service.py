@@ -29,6 +29,10 @@ class SearchStrategyGenerationService:
         "量产落地",
         "3D打印",
         "打样",
+        "管理",
+        "负责",
+        "销售",
+        "运营",
         "团队搭建",
     }
 

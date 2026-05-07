@@ -17,9 +17,10 @@ class AppConfig:
     tavily_api_key: str = ""
     timeout: int = 120
     theme: str = "light"
-    liepin_browser_channel: str = "chromium"
+    liepin_browser_channel: str = "msedge"  # 默认使用 Edge 浏览器
     liepin_browser_headless: bool = False
     liepin_browser_profile_dir: str = "browser_profile/liepin"
+    greeting_template: str = ""
 
 
 class ConfigManager:

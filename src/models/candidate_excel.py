@@ -18,7 +18,13 @@ class CandidateExcelRecord:
     profile_url: str = ""
     capture_status: str = "待抓取"
     resume_text: str = ""
+    match_tier: str = ""
     match_score: Optional[int] = None
     match_detail: str = ""
     captured_at: str = ""
     matched_at: str = ""
+    greeting_status: str = ""
+    greeted_at: str = ""
+    greeting_message: str = ""
+    talent_tags: str = ""
+    contact_info: str = ""

@@ -548,6 +548,12 @@ class LiepinSearchTaskService:
                 "匹配详情": "",
                 "抓取时间": self.candidate_excel_service.now_text(),
                 "匹配时间": "",
+                "人才标签": self.candidate_excel_service.extract_talent_tags(
+                    candidate_summary.summary or ""
+                ),
+                "联系方式": self.candidate_excel_service.extract_contact_info(
+                    candidate_summary.summary or ""
+                ),
             },
         )
 
