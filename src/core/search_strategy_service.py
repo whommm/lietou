@@ -326,6 +326,7 @@ class SearchStrategyService:
                     "match_mode": item.get("match_mode") or "all",
                     "scope": item.get("scope") or "全部经历",
                     "intent": item.get("intent") or "",
+                    "position_filter": item.get("position_filter") or "",
                 }
             )
         return normalized
